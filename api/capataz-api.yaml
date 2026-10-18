@@ -1,0 +1,132 @@
+franciscocarvajal@Macmini capataz % clear
+franciscocarvajal@Macmini capataz % set -a; source .env; set +a
+FID=$(curl -s -H "X-API-Key: $SYNCTHING_API_KEY" $SYNCTHING_URL/rest/config/folders | jq -r '.[0].id')
+
+echo "nuevo" > ~/capataz-dev/sync/pruebas/nuevo.txt
+./scripts/fase0-api.sh pruebas nuevo.txt | sed -n '/db\/file/,/db\/need/p'
+
+curl -s -X POST -H "X-API-Key: $SYNCTHING_API_KEY" "$SYNCTHING_URL/rest/db/scan?folder=$FID"
+sleep 2
+./scripts/fase0-api.sh pruebas nuevo.txt | sed -n '/db\/file/,/db\/need/p'
+### db/file
+RESPUESTA NO JSON: No such object in the index
+### db/need
+### db/file
+{
+  "availability": null,
+  "global": {
+    "blocksHash": "9LPiU+IK5WovSd6Ih5O2vlxWS2INpK2wLjJMfFBjKgM=",
+    "deleted": false,
+    "ignored": false,
+    "invalid": false,
+    "localFlags": 0,
+    "modified": "2026-10-18T00:24:46.361255153-06:00",
+    "modifiedBy": "ICY7WEU",
+    "mustRescan": false,
+    "name": "nuevo.txt",
+    "noPermissions": false,
+    "numBlocks": 1,
+    "permissions": "0644",
+    "platform": {
+      "Unix": null,
+      "Windows": null,
+      "Linux": null,
+      "Darwin": null,
+      "FreeBSD": null,
+      "NetBSD": null
+    },
+    "previousBlocksHash": null,
+    "sequence": 5,
+    "size": 6,
+    "type": "FILE_INFO_TYPE_FILE",
+    "version": [
+      "ICY7WEU:1792304686"
+    ]
+  },
+  "local": {
+    "blocksHash": "9LPiU+IK5WovSd6Ih5O2vlxWS2INpK2wLjJMfFBjKgM=",
+    "deleted": false,
+    "ignored": false,
+    "invalid": false,
+    "localFlags": 0,
+    "modified": "2026-10-18T00:24:46.361255153-06:00",
+    "modifiedBy": "ICY7WEU",
+    "mustRescan": false,
+    "name": "nuevo.txt",
+    "noPermissions": false,
+    "numBlocks": 1,
+    "permissions": "0644",
+    "platform": {
+      "Unix": null,
+      "Windows": null,
+      "Linux": null,
+      "Darwin": null,
+      "FreeBSD": null,
+      "NetBSD": null
+    },
+    "previousBlocksHash": null,
+    "sequence": 5,
+    "size": 6,
+    "type": "FILE_INFO_TYPE_FILE",
+    "version": [
+      "ICY7WEU:1792304686"
+    ]
+  }
+}
+### db/need
+franciscocarvajal@Macmini capataz % >....                                                                                                                              
+H="X-API-Key: $SYNCTHING_API_KEY"
+FID=$(curl -s -H "$H" $SYNCTHING_URL/rest/config/folders | jq -r '.[] | select(.label=="pruebas") | .id')
+P=~/capataz-dev/sync/pruebas
+
+echo "### A) db/need completo"
+curl -s -H "$H" "$SYNCTHING_URL/rest/db/need?folder=$FID" | jq .
+
+echo "### B) modifico uno.txt y consulto SIN escanear"
+echo "texto agregado" >> $P/uno.txt
+curl -s -H "$H" "$SYNCTHING_URL/rest/db/file?folder=$FID&file=uno.txt" | jq '{indice_size: .local.size, indice_modified: .local.modified}'
+stat -f "disco: size=%z mtime=%Sm" $P/uno.txt
+
+echo "### C) escaneo solo ese archivo y vuelvo a consultar"
+curl -s -X POST -H "$H" "$SYNCTHING_URL/rest/db/scan?folder=$FID&sub=uno.txt"
+sleep 2
+curl -s -H "$H" "$SYNCTHING_URL/rest/db/file?folder=$FID&file=uno.txt" | jq '{indice_size: .local.size, indice_modified: .local.modified}'
+
+echo "### D) borro dos.txt y consulto tras escanear"
+rm $P/dos.txt
+curl -s -X POST -H "$H" "$SYNCTHING_URL/rest/db/scan?folder=$FID&sub=dos.txt"
+sleep 2
+curl -s -H "$H" "$SYNCTHING_URL/rest/db/file?folder=$FID&file=dos.txt" | jq '{deleted_local: .local.deleted, deleted_global: .global.deleted}'
+
+echo "### E) archivo en subcarpeta, con la ruta codificada"
+curl -s -G -H "$H" --data-urlencode "folder=$FID" --data-urlencode "file=subcarpeta/tres.txt" \
+  "$SYNCTHING_URL/rest/db/file" | jq '{name: .local.name, size: .local.size}'
+### A) db/need completo
+{
+  "page": 1,
+  "perpage": 65536,
+  "progress": [],
+  "queued": [],
+  "rest": []
+}
+### B) modifico uno.txt y consulto SIN escanear
+{
+  "indice_size": 22,
+  "indice_modified": "2026-10-18T00:19:11.413874451-06:00"
+}
+disco: size=37 mtime=Oct 18 00:26:13 2026
+### C) escaneo solo ese archivo y vuelvo a consultar
+{
+  "indice_size": 37,
+  "indice_modified": "2026-10-18T00:26:13.519277075-06:00"
+}
+### D) borro dos.txt y consulto tras escanear
+{
+  "deleted_local": true,
+  "deleted_global": true
+}
+### E) archivo en subcarpeta, con la ruta codificada
+{
+  "name": "subcarpeta/tres.txt",
+  "size": 8
+}
