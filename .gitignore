@@ -1,0 +1,14 @@
+.env
+*.key
+*.pem
+.DS_Store
+# Datos de desarrollo (viven fuera del repo, por si acaso)
+capataz-dev/
+staging/
+# Go
+/capataz/bin/
+# Flutter
+/app/.dart_tool/
+/app/build/
+# Node
+node_modules/
