@@ -80,13 +80,34 @@
   como SHA-256 y comparado en tiempo constante; interfaz Authenticator para
   el emparejamiento real.
 
+## 2026-10-19 (cifrado y contrato de Capataz Nube)
+- Formato del paquete: CPK1 (docs/formato-paquete-cifrado.md, vectores en
+  docs/vectores-cpk1.json). AES-256-GCM con nonce de contador y bandera de
+  último bloque, subclaves HKDF-SHA-256, cabecera como AAD; detecta
+  alteración, reordenamiento y truncado. Un cambio incompatible será CPK2.
+- Bloques de 1 MiB en claro (chunkSizeLog2 = 20).
+- Subida a Capataz Nube en partes de 8 MiB (la nube acepta de 1 a 8 MiB),
+  reanudable e independiente de los límites de bloque.
+- Tope por enlace: 500 MiB de contenido en claro (524 288 000 bytes), es
+  decir 524 296 032 bytes de paquete; la nube lo publica en
+  limits.maxEncryptedBytes.
+- Token y clave los genera Capataz: 32 bytes aleatorios cada uno, en
+  base64url e independientes. La clave va solo en el fragmento # de la URL;
+  la nube guarda únicamente SHA-256(token).
+- El vencimiento lo fija Capataz al abrir la subida (hora de la solicitud
+  más ttlSeconds) y la nube lo hace cumplir aunque Capataz esté apagado.
+- El nombre del archivo viaja cifrado en los metadatos (metaBlob); la
+  descarga de /s/{token}/blob no lleva Content-Disposition.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Confirmar el tope de 500 MB por enlace.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
-- Contrato v0.2.3 con 304, 405 y 412 documentados (hoy 405 y 412 salen como
-  invalid_request; 304 lo genera ServeContent con If-Modified-Since).
+- Contrato v0.2.3 de Capataz: 304, 405 y 412 documentados (hoy 405 y 412 salen
+  como invalid_request; 304 lo genera ServeContent con If-Modified-Since);
+  encryption=client por defecto en LinkRequest; el estado exhausted de la
+  nube se muestra como expired en Link.status.
 - Medir el rendimiento de descargas en la Raspberry Pi: el ResponseWriter
   envuelto (bitácora y plazo por inactividad) desactiva sendfile.
