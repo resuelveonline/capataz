@@ -1,5 +1,3 @@
-cd ~/dev/capataz
-cat > docs/decisiones.md <<'EOF'
 # Registro de decisiones
 
 ## 2026-10-17
@@ -61,4 +59,4 @@ cat > docs/decisiones.md <<'EOF'
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
-EOF
+- Contrato v0.2.2 con códigos syncthing_unavailable (502) e internal_error (500).

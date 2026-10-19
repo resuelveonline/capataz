@@ -1,12 +1,19 @@
 .env
+.env.*
+!.env.example
 *.key
 *.pem
 .DS_Store
-# Datos de desarrollo (viven fuera del repo, por si acaso)
+# Datos de desarrollo y estado de la instancia (viven fuera del repo, por si acaso)
 capataz-dev/
+capataz-host/
+capataz-state/
+state/
 staging/
-# Go
+instance.json
+# Go: binarios compilados
 /capataz/bin/
+/capataz/capataz
 # Flutter
 /app/.dart_tool/
 /app/build/
