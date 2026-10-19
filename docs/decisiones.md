@@ -88,8 +88,9 @@
 - Bloques de 1 MiB en claro (chunkSizeLog2 = 20).
 - Subida a Capataz Nube en partes de 8 MiB (la nube acepta de 1 a 8 MiB),
   reanudable e independiente de los límites de bloque.
-- Tope por enlace: 500 MiB de contenido en claro (524 288 000 bytes), es
-  decir 524 296 032 bytes de paquete; la nube lo publica en
+- Tope por enlace decidido: 500 MiB de contenido en claro (524 288 000
+  bytes), es decir 524 296 032 bytes de paquete. Sustituye al tope
+  provisional de 500 MB del 2026-10-18. La nube lo publica en
   limits.maxEncryptedBytes.
 - Token y clave los genera Capataz: 32 bytes aleatorios cada uno, en
   base64url e independientes. La clave va solo en el fragmento # de la URL;
@@ -101,7 +102,6 @@
 
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
-- Confirmar el tope de 500 MB por enlace.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo).
 - Si las apps podrán subir archivos (propuesto: Fase 3).

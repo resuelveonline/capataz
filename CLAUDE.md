@@ -33,9 +33,13 @@ archivos, y generar enlaces temporales de solo lectura.
   failed, expired, revoked.
 - Al expirar o revocar: se borra la copia y se invalida el token. Revocar
   requiere conexión con Capataz Nube; vencer no.
-- Cifrado opcional desde el inicio: AES-256-GCM por bloques, clave por enlace
-  en el fragmento # de la URL, nunca guardada en el servidor. Tope provisional
-  de 500 MB por enlace cifrado.
+- Cifrado: CPK1, cifrado de extremo a extremo (formato en
+  [docs/formato-paquete-cifrado.md](docs/formato-paquete-cifrado.md)). Por
+  decisión tomada será obligatorio por defecto (encryption=client) cuando
+  salga el contrato v0.2.3; hoy el contrato v0.2.2 aún dice none. Clave por
+  enlace en el fragmento # de la URL, nunca guardada en el servidor.
+- Tope por enlace: 500 MiB de contenido (524 288 000 bytes; 524 296 032 de
+  paquete).
 - Antes de copiar: db/scan con sub=, validar con db/file y db/need que el
   archivo exista, esté indexado (no texto "No such object in the index"), no
   esté borrado (deleted=true) ni a medio sincronizar. Verificar tamaño y fecha
