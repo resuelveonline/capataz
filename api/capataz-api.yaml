@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Capataz API
-  version: 0.2.1
+  version: 0.2.2
   license:
     name: Propietaria
   description: >
@@ -46,6 +46,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Instance" }
         "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /auth/pair:
     post:
@@ -72,6 +73,7 @@ paths:
               schema: { $ref: "#/components/schemas/TokenPair" }
         "401": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /auth/refresh:
     post:
@@ -95,6 +97,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TokenPair" }
         "401": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /pairing-codes:
     post:
@@ -108,7 +111,9 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PairingCode" }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /devices:
     get:
@@ -124,7 +129,9 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /devices/{id}:
     delete:
@@ -136,8 +143,10 @@ paths:
         - { $ref: "#/components/parameters/Id" }
       responses:
         "204": { description: Revocado }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /folders:
     get:
@@ -153,6 +162,8 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Folder" }
         "401": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
   /files:
     get:
@@ -171,7 +182,10 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Entry" }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
     post:
       operationId: uploadFile
       tags: [Archivos]
@@ -192,8 +206,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Entry" }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteFile
       tags: [Archivos]
@@ -204,7 +221,10 @@ paths:
       responses:
         "204": { description: Borrado }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
   /files/mkdir:
     post:
@@ -228,7 +248,10 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Entry" }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
   /files/move:
     post:
@@ -253,8 +276,11 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Entry" }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
   /files/download:
     get:
@@ -273,7 +299,11 @@ paths:
               schema: { type: string, format: binary }
         "206": { description: Contenido parcial }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "416": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 
   /links:
     post:
@@ -299,9 +329,12 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Link" }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "413": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
     get:
       operationId: listLinks
       tags: [Enlaces]
@@ -320,7 +353,9 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Link" }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
   /links/{id}:
     get:
@@ -336,8 +371,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Link" }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
     delete:
       operationId: revokeLink
       tags: [Enlaces]
@@ -347,8 +384,10 @@ paths:
         - { $ref: "#/components/parameters/Id" }
       responses:
         "204": { description: Revocado }
+        "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
 
   /s/{token}:
@@ -374,6 +413,8 @@ paths:
               schema: { type: string, format: binary }
         "206": { description: Contenido parcial }
         "404": { description: "No existe, expiró, fue revocado o alcanzó su límite de descargas" }
+        "416": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:
@@ -412,7 +453,11 @@ components:
       properties:
         code:
           type: string
-          description: Código estable para que portal y apps lo traduzcan igual
+          description: >
+            Código estable para que portal y apps lo traduzcan igual.
+            syncthing_unavailable (502) indica que Capataz no pudo hablar con
+            Syncthing; internal_error (500) es un fallo interno cuyo detalle
+            solo queda en la bitácora del servidor.
           enum:
             - unauthorized
             - forbidden
@@ -429,6 +474,8 @@ components:
             - link_revoked
             - cloud_unreachable
             - cloud_quota_exceeded
+            - syncthing_unavailable
+            - internal_error
         message: { type: string }
 
     Instance:

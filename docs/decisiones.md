@@ -1,5 +1,3 @@
-cd ~/dev/capataz
-cat > docs/decisiones.md <<'EOF'
 # Registro de decisiones
 
 ## 2026-10-17
@@ -55,10 +53,40 @@ cat > docs/decisiones.md <<'EOF'
 - Fase 1: Capataz en Go, solo lectura (instance, folders, files, download), con
   token de desarrollo por .env. Emparejamiento y enlaces vienen después.
 
+## 2026-10-19 (Fase 1 implementada)
+- Contrato v0.2.2: 401 en operaciones protegidas, 500 en todas, 502 en las que
+  hablan con Syncthing o Capataz Nube, 416 en las descargas; códigos nuevos
+  syncthing_unavailable (502) e internal_error (500).
+- Rutas: validación de texto (sin "..", absolutas, bytes nulos ni "\") y
+  acceso al disco con os.Root, que impide salir de la carpeta también por
+  enlaces simbólicos y sin carreras entre validar y abrir. Los ocultos de
+  Syncthing se comparan sin distinguir mayúsculas (APFS) y responden 404.
+- Sin WriteTimeout global (cortaría descargas grandes): 30 s por petición en
+  respuestas normales y, en descargas, plazo de 2 min por inactividad
+  renovado con http.ResponseController. ReadHeaderTimeout e IdleTimeout en
+  el servidor.
+- Range no satisfacible: 416 con code invalid_request, cuerpo JSON del
+  contrato y Content-Range: bytes */<tamaño>. No se añade un código propio.
+- Bitácora: solo método, patrón de ruta, estado, bytes y duración. Nunca URL
+  real, cadena de consulta, headers, rutas ni nombres de archivo (pueden ser
+  datos de expedientes). Lo verifican una prueba unitaria y el smoke.
+- Identidad de la instancia: instanceId aleatorio (128 bits) en
+  CAPATAZ_STATE_DIR/instance.json, en el host ~/capataz-host/state (no en
+  ~/capataz-dev). Se respalda; si está dañado, Capataz no arranca.
+- db/file de Syncthing v2.1.6 responde 404 text/plain "No such object in the
+  index" tanto para archivos fuera del índice como para carpetas
+  inexistentes: Capataz valida la carpeta contra config/folders primero.
+- Autenticación de desarrollo: un token por .env (≥32 caracteres), guardado
+  como SHA-256 y comparado en tiempo constante; interfaz Authenticator para
+  el emparejamiento real.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Confirmar el tope de 500 MB por enlace.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
-EOF
+- Contrato v0.2.3 con 304, 405 y 412 documentados (hoy 405 y 412 salen como
+  invalid_request; 304 lo genera ServeContent con If-Modified-Since).
+- Medir el rendimiento de descargas en la Raspberry Pi: el ResponseWriter
+  envuelto (bitácora y plazo por inactividad) desactiva sendfile.
