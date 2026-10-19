@@ -8,9 +8,11 @@
 capataz-dev/
 capataz-host/
 capataz-state/
-state/
+/state/
+/capataz/state/
 staging/
-instance.json
+/instance.json
+/capataz/instance.json
 # Go: binarios compilados
 /capataz/bin/
 /capataz/capataz
