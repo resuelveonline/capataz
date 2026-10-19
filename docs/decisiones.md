@@ -60,3 +60,7 @@
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
 - Contrato v0.2.2 con códigos syncthing_unavailable (502) e internal_error (500).
+- Contrato v0.2.3 con 304, 405 y 412 documentados (hoy 405 y 412 salen como
+  invalid_request; 304 lo genera ServeContent con If-Modified-Since).
+- Medir el rendimiento de descargas en la Raspberry Pi: el ResponseWriter
+  envuelto (bitácora y plazo por inactividad) desactiva sendfile.
