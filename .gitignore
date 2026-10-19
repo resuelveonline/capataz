@@ -5,12 +5,12 @@
 *.pem
 .DS_Store
 # Datos de desarrollo y estado de la instancia (viven fuera del repo, por si acaso)
-capataz-dev/
-capataz-host/
-capataz-state/
+/capataz-dev/
+/capataz-host/
+/capataz-state/
 /state/
 /capataz/state/
-staging/
+/staging/
 /instance.json
 /capataz/instance.json
 # Go: binarios compilados
