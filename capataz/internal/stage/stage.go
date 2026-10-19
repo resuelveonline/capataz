@@ -235,7 +235,7 @@ func (s *Stager) Begin(ctx context.Context, items []Item) (_ *Snapshot, err erro
 	if err != nil {
 		return nil, syncErr(0, err)
 	}
-	if err := s.checkOutsideFolders(folders); err != nil {
+	if err := checkOutsideFolders(s.dir, "el staging", folders); err != nil {
 		return nil, err
 	}
 
@@ -525,12 +525,22 @@ func (sn *Snapshot) fileCount() int {
 	return n
 }
 
-// checkOutsideFolders exige que el staging no esté dentro de ninguna
-// carpeta sincronizada (ni al revés), comparando rutas reales.
-func (s *Stager) checkOutsideFolders(folders []syncthing.Folder) error {
-	staging, err := realPath(s.dir)
+// CheckOutside exige que dir (que debe existir) esté fuera de toda carpeta
+// sincronizada. what nombra el directorio en el mensaje ("la salida").
+func (s *Stager) CheckOutside(ctx context.Context, dir, what string) error {
+	folders, err := s.st.Folders(ctx)
 	if err != nil {
-		return newErr(0, CodeInternal, "staging inaccesible", err)
+		return syncErr(0, err)
+	}
+	return checkOutsideFolders(dir, what, folders)
+}
+
+// checkOutsideFolders exige que dir no esté dentro de ninguna carpeta
+// sincronizada (ni al revés), comparando rutas reales.
+func checkOutsideFolders(dir, what string, folders []syncthing.Folder) error {
+	staging, err := realPath(dir)
+	if err != nil {
+		return newErr(0, CodeInternal, what+" no es accesible", err)
 	}
 	for _, f := range folders {
 		p, err := config.ExpandHome(f.Path)
@@ -542,7 +552,7 @@ func (s *Stager) checkOutsideFolders(folders []syncthing.Folder) error {
 			continue // carpeta sin disco: se detecta al usarla
 		}
 		if within(staging, fp) || within(fp, staging) {
-			return newErr(0, CodeInternal, "el staging está dentro de una carpeta sincronizada", nil)
+			return newErr(0, CodeInternal, what+" está dentro de una carpeta sincronizada", nil)
 		}
 	}
 	return nil
