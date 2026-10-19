@@ -1,132 +1,532 @@
-franciscocarvajal@Macmini capataz % clear
-franciscocarvajal@Macmini capataz % set -a; source .env; set +a
-FID=$(curl -s -H "X-API-Key: $SYNCTHING_API_KEY" $SYNCTHING_URL/rest/config/folders | jq -r '.[0].id')
+openapi: 3.0.3
+info:
+  title: Capataz API
+  version: 0.2.1
+  license:
+    name: Propietaria
+  description: >
+    API del host (Capataz). La consumen el portal web y las apps Flutter
+    (Android/iOS). Capataz es la única puerta hacia Syncthing: los clientes
+    nunca hablan con él. Los enlaces temporales se preparan en el host y se
+    publican en Capataz Nube (hosting compartido), que es quien sirve la
+    descarga pública y decide el vencimiento.
+    Las operaciones marcadas con x-roles [titular] las rechaza el servidor con
+    403 si el token no pertenece a la cuenta titular.
 
-echo "nuevo" > ~/capataz-dev/sync/pruebas/nuevo.txt
-./scripts/fase0-api.sh pruebas nuevo.txt | sed -n '/db\/file/,/db\/need/p'
+servers:
+  - url: http://localhost:8080
+    description: Etapa 1 (local)
 
-curl -s -X POST -H "X-API-Key: $SYNCTHING_API_KEY" "$SYNCTHING_URL/rest/db/scan?folder=$FID"
-sleep 2
-./scripts/fase0-api.sh pruebas nuevo.txt | sed -n '/db\/file/,/db\/need/p'
-### db/file
-RESPUESTA NO JSON: No such object in the index
-### db/need
-### db/file
-{
-  "availability": null,
-  "global": {
-    "blocksHash": "9LPiU+IK5WovSd6Ih5O2vlxWS2INpK2wLjJMfFBjKgM=",
-    "deleted": false,
-    "ignored": false,
-    "invalid": false,
-    "localFlags": 0,
-    "modified": "2026-10-18T00:24:46.361255153-06:00",
-    "modifiedBy": "ICY7WEU",
-    "mustRescan": false,
-    "name": "nuevo.txt",
-    "noPermissions": false,
-    "numBlocks": 1,
-    "permissions": "0644",
-    "platform": {
-      "Unix": null,
-      "Windows": null,
-      "Linux": null,
-      "Darwin": null,
-      "FreeBSD": null,
-      "NetBSD": null
-    },
-    "previousBlocksHash": null,
-    "sequence": 5,
-    "size": 6,
-    "type": "FILE_INFO_TYPE_FILE",
-    "version": [
-      "ICY7WEU:1792304686"
-    ]
-  },
-  "local": {
-    "blocksHash": "9LPiU+IK5WovSd6Ih5O2vlxWS2INpK2wLjJMfFBjKgM=",
-    "deleted": false,
-    "ignored": false,
-    "invalid": false,
-    "localFlags": 0,
-    "modified": "2026-10-18T00:24:46.361255153-06:00",
-    "modifiedBy": "ICY7WEU",
-    "mustRescan": false,
-    "name": "nuevo.txt",
-    "noPermissions": false,
-    "numBlocks": 1,
-    "permissions": "0644",
-    "platform": {
-      "Unix": null,
-      "Windows": null,
-      "Linux": null,
-      "Darwin": null,
-      "FreeBSD": null,
-      "NetBSD": null
-    },
-    "previousBlocksHash": null,
-    "sequence": 5,
-    "size": 6,
-    "type": "FILE_INFO_TYPE_FILE",
-    "version": [
-      "ICY7WEU:1792304686"
-    ]
-  }
-}
-### db/need
-franciscocarvajal@Macmini capataz % >....                                                                                                                              
-H="X-API-Key: $SYNCTHING_API_KEY"
-FID=$(curl -s -H "$H" $SYNCTHING_URL/rest/config/folders | jq -r '.[] | select(.label=="pruebas") | .id')
-P=~/capataz-dev/sync/pruebas
+security:
+  - bearerAuth: []
 
-echo "### A) db/need completo"
-curl -s -H "$H" "$SYNCTHING_URL/rest/db/need?folder=$FID" | jq .
+tags:
+  - name: Instancia
+    description: Identidad pública de la instancia.
+  - name: Autenticación
+    description: Emparejamiento de dispositivos y renovación de tokens.
+  - name: Dispositivos
+    description: Gestión de dispositivos emparejados (solo titular).
+  - name: Archivos
+    description: Navegar, subir, descargar y organizar archivos de la instancia.
+  - name: Enlaces
+    description: Enlaces temporales de solo lectura.
 
-echo "### B) modifico uno.txt y consulto SIN escanear"
-echo "texto agregado" >> $P/uno.txt
-curl -s -H "$H" "$SYNCTHING_URL/rest/db/file?folder=$FID&file=uno.txt" | jq '{indice_size: .local.size, indice_modified: .local.modified}'
-stat -f "disco: size=%z mtime=%Sm" $P/uno.txt
+paths:
+  /instance:
+    get:
+      operationId: getInstance
+      tags: [Instancia]
+      summary: Identidad de la instancia (sin datos sensibles)
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        "429": { $ref: "#/components/responses/Error" }
 
-echo "### C) escaneo solo ese archivo y vuelvo a consultar"
-curl -s -X POST -H "$H" "$SYNCTHING_URL/rest/db/scan?folder=$FID&sub=uno.txt"
-sleep 2
-curl -s -H "$H" "$SYNCTHING_URL/rest/db/file?folder=$FID&file=uno.txt" | jq '{indice_size: .local.size, indice_modified: .local.modified}'
+  /auth/pair:
+    post:
+      operationId: pairDevice
+      tags: [Autenticación]
+      summary: Empareja un dispositivo con un código de un solo uso (QR)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairingCode, deviceName, platform]
+              properties:
+                pairingCode: { type: string }
+                deviceName:  { type: string, maxLength: 80 }
+                platform:    { type: string, enum: [web, android, ios] }
+      responses:
+        "200":
+          description: Credenciales del dispositivo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
 
-echo "### D) borro dos.txt y consulto tras escanear"
-rm $P/dos.txt
-curl -s -X POST -H "$H" "$SYNCTHING_URL/rest/db/scan?folder=$FID&sub=dos.txt"
-sleep 2
-curl -s -H "$H" "$SYNCTHING_URL/rest/db/file?folder=$FID&file=dos.txt" | jq '{deleted_local: .local.deleted, deleted_global: .global.deleted}'
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [Autenticación]
+      summary: Renueva el token de acceso
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        "200":
+          description: Nuevo par de tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPair" }
+        "401": { $ref: "#/components/responses/Error" }
 
-echo "### E) archivo en subcarpeta, con la ruta codificada"
-curl -s -G -H "$H" --data-urlencode "folder=$FID" --data-urlencode "file=subcarpeta/tres.txt" \
-  "$SYNCTHING_URL/rest/db/file" | jq '{name: .local.name, size: .local.size}'
-### A) db/need completo
-{
-  "page": 1,
-  "perpage": 65536,
-  "progress": [],
-  "queued": [],
-  "rest": []
-}
-### B) modifico uno.txt y consulto SIN escanear
-{
-  "indice_size": 22,
-  "indice_modified": "2026-10-18T00:19:11.413874451-06:00"
-}
-disco: size=37 mtime=Oct 18 00:26:13 2026
-### C) escaneo solo ese archivo y vuelvo a consultar
-{
-  "indice_size": 37,
-  "indice_modified": "2026-10-18T00:26:13.519277075-06:00"
-}
-### D) borro dos.txt y consulto tras escanear
-{
-  "deleted_local": true,
-  "deleted_global": true
-}
-### E) archivo en subcarpeta, con la ruta codificada
-{
-  "name": "subcarpeta/tres.txt",
-  "size": 8
-}
+  /pairing-codes:
+    post:
+      operationId: createPairingCode
+      tags: [Autenticación]
+      summary: Genera un código/QR de emparejamiento de un solo uso
+      x-roles: [titular]
+      responses:
+        "201":
+          description: Código generado (vigencia corta)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingCode" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /devices:
+    get:
+      operationId: listDevices
+      tags: [Dispositivos]
+      summary: Lista los dispositivos emparejados
+      x-roles: [titular]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Device" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /devices/{id}:
+    delete:
+      operationId: revokeDevice
+      tags: [Dispositivos]
+      summary: Revoca un dispositivo (sus tokens dejan de funcionar)
+      x-roles: [titular]
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "204": { description: Revocado }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /folders:
+    get:
+      operationId: listFolders
+      tags: [Archivos]
+      summary: Lista las carpetas visibles de la instancia
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Folder" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /files:
+    get:
+      operationId: listFiles
+      tags: [Archivos]
+      summary: Lista el contenido de una ruta
+      parameters:
+        - { $ref: "#/components/parameters/FolderQ" }
+        - { name: path, in: query, required: false, schema: { type: string, default: "" } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Entry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: uploadFile
+      tags: [Archivos]
+      summary: Sube un archivo (Fase 3)
+      parameters:
+        - { $ref: "#/components/parameters/FolderQ" }
+        - { $ref: "#/components/parameters/PathQ" }
+        - { name: overwrite, in: query, required: false, schema: { type: boolean, default: false } }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteFile
+      tags: [Archivos]
+      summary: Borra un archivo o carpeta
+      parameters:
+        - { $ref: "#/components/parameters/FolderQ" }
+        - { $ref: "#/components/parameters/PathQ" }
+      responses:
+        "204": { description: Borrado }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /files/mkdir:
+    post:
+      operationId: createFolder
+      tags: [Archivos]
+      summary: Crea una carpeta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [folder, path]
+              properties:
+                folder: { type: string }
+                path:   { type: string }
+      responses:
+        "201":
+          description: Creada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /files/move:
+    post:
+      operationId: moveEntry
+      tags: [Archivos]
+      summary: Renombra o mueve un archivo o carpeta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [folder, from, to]
+              properties:
+                folder: { type: string }
+                from:   { type: string }
+                to:     { type: string }
+      responses:
+        "200":
+          description: Movido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /files/download:
+    get:
+      operationId: downloadFile
+      tags: [Archivos]
+      summary: Descarga un archivo (admite Range para reanudar)
+      parameters:
+        - { $ref: "#/components/parameters/FolderQ" }
+        - { $ref: "#/components/parameters/PathQ" }
+        - { name: Range, in: header, required: false, schema: { type: string, example: "bytes=0-1048575" } }
+      responses:
+        "200":
+          description: Contenido completo
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "206": { description: Contenido parcial }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /links:
+    post:
+      operationId: createLink
+      tags: [Enlaces]
+      summary: Crea un enlace temporal de solo lectura (asíncrono)
+      description: >
+        Capataz prepara una copia congelada de los elementos (escaneo, verificación
+        de estado, copia a staging, verificación posterior), la sube a Capataz Nube
+        y publica el enlace. Responde de inmediato con el enlace en estado
+        `preparing`; el cliente consulta GET /links/{id} hasta que esté `active`
+        o `failed`. La copia no sigue cambios posteriores de Syncthing.
+      x-roles: [titular]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinkRequest" }
+      responses:
+        "202":
+          description: Enlace en preparación
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Link" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listLinks
+      tags: [Enlaces]
+      summary: Lista los enlaces
+      x-roles: [titular]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/LinkStatus" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Link" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /links/{id}:
+    get:
+      operationId: getLink
+      tags: [Enlaces]
+      summary: Consulta el estado de un enlace
+      x-roles: [titular]
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Link" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: revokeLink
+      tags: [Enlaces]
+      summary: Revoca un enlace y borra su copia (requiere conexión con Capataz Nube)
+      x-roles: [titular]
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+      responses:
+        "204": { description: Revocado }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /s/{token}:
+    get:
+      operationId: downloadSharedLink
+      tags: [Enlaces]
+      summary: Descarga pública (sin sesión). La sirve Capataz Nube
+      description: >
+        Un archivo, o un ZIP si el enlace tiene varios elementos. Si el enlace
+        es de modo `client`, el contenido descargado está cifrado y el navegador
+        lo descifra con la clave del fragmento (#) de la URL, que nunca se envía
+        al servidor. Se documenta aquí por completitud; en producción este
+        endpoint vive en Capataz Nube.
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+        - { name: Range, in: header, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Contenido
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "206": { description: Contenido parcial }
+        "404": { description: "No existe, expiró, fue revocado o alcanzó su límite de descargas" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    FolderQ:
+      name: folder
+      in: query
+      required: true
+      schema: { type: string }
+    PathQ:
+      name: path
+      in: query
+      required: true
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Código estable para que portal y apps lo traduzcan igual
+          enum:
+            - unauthorized
+            - forbidden
+            - not_found
+            - invalid_request
+            - path_not_allowed
+            - file_in_use
+            - file_not_synced
+            - file_changed_during_copy
+            - already_exists
+            - payload_too_large
+            - rate_limited
+            - link_expired
+            - link_revoked
+            - cloud_unreachable
+            - cloud_quota_exceeded
+        message: { type: string }
+
+    Instance:
+      type: object
+      properties:
+        instanceId: { type: string }
+        name:       { type: string }
+        version:    { type: string }
+        publicMode: { type: string, enum: [local, nube] }
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken:  { type: string }
+        refreshToken: { type: string }
+        expiresIn:    { type: integer, description: Segundos de vida del accessToken }
+        role:         { type: string, enum: [titular, device] }
+
+    PairingCode:
+      type: object
+      properties:
+        code:      { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    Device:
+      type: object
+      properties:
+        id:         { type: string }
+        name:       { type: string }
+        platform:   { type: string, enum: [web, android, ios] }
+        createdAt:  { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time, nullable: true }
+
+    Folder:
+      type: object
+      properties:
+        id:    { type: string }
+        label: { type: string }
+
+    Entry:
+      type: object
+      properties:
+        name:     { type: string }
+        path:     { type: string }
+        isDir:    { type: boolean }
+        size:     { type: integer, format: int64 }
+        modified: { type: string, format: date-time }
+
+    LinkStatus:
+      type: string
+      enum: [preparing, uploading, active, failed, expired, revoked]
+
+    LinkRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [folder, path]
+            properties:
+              folder: { type: string }
+              path:   { type: string }
+        ttlSeconds:
+          type: integer
+          minimum: 3600
+          maximum: 2592000
+          default: 86400
+          description: Vigencia en segundos (mínimo 1 hora, máximo 30 días, por defecto 24 horas)
+        maxDownloads: { type: integer, minimum: 1, nullable: true }
+        label:        { type: string, maxLength: 120 }
+        encryption:
+          type: string
+          enum: [none, client]
+          default: none
+
+    Link:
+      type: object
+      properties:
+        id:           { type: string }
+        url:
+          type: string
+          nullable: true
+          description: Disponible cuando status=active
+        label:        { type: string, nullable: true }
+        status:       { $ref: "#/components/schemas/LinkStatus" }
+        progress:     { type: number, minimum: 0, maximum: 1 }
+        failureCode:
+          type: string
+          nullable: true
+          description: Código de Error cuando status=failed
+        createdAt:    { type: string, format: date-time }
+        expiresAt:    { type: string, format: date-time }
+        downloads:    { type: integer }
+        maxDownloads: { type: integer, nullable: true }
+        items:        { type: array, items: { type: string } }
+        sizeBytes:    { type: integer, format: int64, nullable: true }
+        sha256:       { type: string, nullable: true }
+        encryption:   { type: string, enum: [none, client] }

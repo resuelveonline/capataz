@@ -1,0 +1,8 @@
+extends:
+  - recommended
+
+rules:
+  # En la etapa 1 el servidor es localhost a propósito.
+  no-server-example.com: off
+  # Proyecto propietario: la licencia no tiene URL pública.
+  info-license-strict: off
