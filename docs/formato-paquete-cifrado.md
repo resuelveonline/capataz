@@ -110,7 +110,7 @@ con peticiones `Range` si algún día se necesita.
 
 ### 4.4 Límites
 
-- Contenido máximo por enlace (provisional): **500 MiB = 524 288 000 bytes** de contenido en
+- Contenido máximo por enlace: **500 MiB = 524 288 000 bytes** de contenido en
   claro. Con `C = 1 MiB` son 500 bloques y el paquete mide como máximo **524 296 032 bytes**.
   Capataz Nube publica este tope en `GET /v1/instance` (`limits.maxEncryptedBytes`).
 - El contador de bloque es de 32 bits. No se alcanza con ningún tamaño realista.
