@@ -1,0 +1,687 @@
+openapi: 3.0.3
+info:
+  title: Capataz Nube
+  version: 0.1.0
+  description: |
+    Servicio en la nube (Laravel, hosting compartido) que guarda las copias congeladas y
+    cifradas que prepara una instancia de Capataz y las sirve por una URL temporal.
+
+    Este contrato tiene dos caras:
+
+    - **API de instancia** (`/v1/...`): la usa únicamente Capataz, firmada con HMAC.
+    - **Descarga pública** (`/s/...`): la usa el navegador de quien recibe el enlace.
+
+    Capataz Nube **nunca** ve el contenido, los nombres ni la clave: guarda bytes cifrados
+    con el formato CPK1 (ver `docs/formato-paquete-cifrado.md`) y `SHA-256(token)`.
+
+    ## Autenticación de la API de instancia
+
+    Cada petición a `/v1/...` lleva cinco cabeceras:
+
+    | Cabecera | Valor |
+    |---|---|
+    | `X-Capataz-Instance` | `instanceId` de la instancia |
+    | `X-Capataz-Timestamp` | segundos Unix UTC |
+    | `X-Capataz-Nonce` | 16 bytes aleatorios en base64url, distinto en cada petición |
+    | `X-Capataz-Content-SHA256` | SHA-256 del cuerpo en hexadecimal minúscula (cuerpo vacío: `e3b0c442...b855`) |
+    | `X-Capataz-Signature` | `base64url(HMAC-SHA256(claveInstancia, cadenaCanónica))` |
+
+    La cadena canónica son cinco líneas separadas por `\n`, sin salto final:
+
+    ```
+    MÉTODO
+    destino-de-la-petición     (ruta y consulta tal como viajan, sin host)
+    timestamp
+    nonce
+    sha256-hex-del-cuerpo
+    ```
+
+    Reglas del servidor, en este orden: instancia conocida y activa; marca de tiempo dentro
+    de ±300 s (si no, `timestamp_out_of_window` y `serverTime` en la respuesta); el cuerpo
+    recibido coincide con `X-Capataz-Content-SHA256` (si no, `checksum_mismatch`); firma
+    válida, comparada en tiempo constante; nonce no usado en los últimos 10 minutos para
+    esa instancia (si no, `replayed_nonce`).
+
+    La `claveInstancia` son 32 bytes aleatorios que se generan al dar de alta la instancia
+    desde la consola del servidor (`php artisan capataz:instance:add <instanceId>`) y se
+    muestran una sola vez. Capataz la guarda en `CAPATAZ_NUBE_KEY`.
+
+    ## Vencimiento y descargas
+
+    La nube es la autoridad del vencimiento. `expiresAt` lo fija Capataz al abrir la subida
+    (hora de la solicitud más `ttlSeconds`) y la nube lo respeta aunque Capataz esté apagado:
+    pasada esa hora la descarga responde 410 y los bytes se borran en la siguiente pasada
+    del programador de tareas.
+
+    `maxDownloads` cuenta como descarga cada petición a `/s/{token}/blob` que empiece en el
+    byte 0 (sin `Range` o con `Range: bytes=0-...`). Las peticiones con `Range` que empiezan
+    más adelante son continuaciones y no cuentan. Al agotarse el cupo, las peticiones que
+    empiezan en el byte 0 responden 410 `downloads_exhausted`.
+  license:
+    name: Propietaria
+    url: https://github.com/resuelveonline/capataz
+servers:
+  - url: https://sync.softmx.net
+    description: Producción (etapa 2)
+tags:
+  - name: Instancia
+    description: Operaciones firmadas que usa Capataz.
+  - name: Subida
+    description: Subida por partes reanudable de un paquete cifrado.
+  - name: Descarga
+    description: Operaciones públicas para quien recibe el enlace.
+
+paths:
+  /v1/instance:
+    get:
+      tags: [Instancia]
+      operationId: getCloudInstance
+      summary: Comprueba credenciales y devuelve límites y uso
+      description: |
+        Sirve de prueba de conectividad y de reloj. Capataz lo consulta al arrancar y antes
+        de cada subida.
+      parameters:
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+      security:
+        - capatazHmac: []
+      responses:
+        "200":
+          description: Credenciales válidas.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudInstance" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/links:
+    post:
+      tags: [Subida]
+      operationId: openUpload
+      summary: Abre la subida de un enlace
+      description: |
+        Es idempotente por `linkId`: repetir la misma petición con el mismo cuerpo devuelve
+        200 con el estado actual (incluidas las partes ya recibidas, para reanudar). Con el
+        mismo `linkId` y un cuerpo distinto responde 409 `conflict`.
+      parameters:
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+      security:
+        - capatazHmac: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenUploadRequest" }
+      responses:
+        "200":
+          description: La subida ya estaba abierta con el mismo cuerpo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudLink" }
+        "201":
+          description: Subida abierta.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudLink" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    get:
+      tags: [Instancia]
+      operationId: listCloudLinks
+      summary: Lista los enlaces de la instancia
+      description: |
+        Sirve para conciliar el estado de Capataz con el de la nube tras un reinicio.
+        Orden: del más reciente al más antiguo.
+      parameters:
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+        - name: state
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/CloudLinkState" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      security:
+        - capatazHmac: []
+      responses:
+        "200":
+          description: Página de enlaces.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudLinkList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/links/{linkId}:
+    parameters:
+      - $ref: "#/components/parameters/LinkId"
+    get:
+      tags: [Instancia]
+      operationId: getCloudLink
+      summary: Estado de un enlace
+      parameters:
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+      security:
+        - capatazHmac: []
+      responses:
+        "200":
+          description: Estado actual.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudLink" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      tags: [Instancia]
+      operationId: revokeCloudLink
+      summary: Revoca un enlace y borra sus bytes
+      description: |
+        Idempotente: revocar un enlace ya revocado, vencido o borrado responde 204.
+        Un enlace que nunca existió responde 404.
+      parameters:
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+      security:
+        - capatazHmac: []
+      responses:
+        "204":
+          description: Revocado.
+        "401": { $ref: "#/components/responses/AuthError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/links/{linkId}/parts/{partNumber}:
+    put:
+      tags: [Subida]
+      operationId: uploadPart
+      summary: Sube una parte del paquete
+      description: |
+        Las partes se numeran desde 1. Todas miden `partSize` bytes salvo la última, que
+        mide el resto. Las partes se pueden subir en cualquier orden y repetir: subir de
+        nuevo una parte la sustituye (útil si una subida quedó a medias). Los límites de
+        parte no tienen que coincidir con los límites de bloque CPK1.
+      parameters:
+        - $ref: "#/components/parameters/LinkId"
+        - name: partNumber
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+      security:
+        - capatazHmac: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Parte guardada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PartReceipt" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/links/{linkId}/complete:
+    post:
+      tags: [Subida]
+      operationId: completeUpload
+      summary: Cierra la subida y activa el enlace
+      description: |
+        Verifica que están todas las partes, que la suma de tamaños es `encryptedSize` y que
+        el SHA-256 del paquete ensamblado coincide con `ciphertextSha256`. Si todo cuadra,
+        el enlace pasa a `active` y desde ese momento `/s/{token}` lo sirve.
+        Si faltan partes responde 409 `parts_missing` con `missingParts`.
+        Es idempotente: completar un enlace ya activo con el mismo hash responde 200.
+      parameters:
+        - $ref: "#/components/parameters/LinkId"
+        - $ref: "#/components/parameters/Instance"
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Nonce"
+        - $ref: "#/components/parameters/ContentSha256"
+        - $ref: "#/components/parameters/Signature"
+      security:
+        - capatazHmac: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteRequest" }
+      responses:
+        "200":
+          description: Enlace activo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudLink" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/AuthError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "422": { $ref: "#/components/responses/ChecksumFailed" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /s/{token}:
+    get:
+      tags: [Descarga]
+      operationId: downloadPage
+      summary: Página de descarga
+      description: |
+        Devuelve siempre la misma página estática (HTML y un script propio) para cualquier
+        `token`, exista o no, para que su respuesta no revele qué enlaces existen. La página
+        lee la clave del fragmento de la URL, consulta `/s/{token}/meta`, descarga
+        `/s/{token}/blob` y descifra en el navegador.
+
+        Cabeceras obligatorias: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+        `X-Robots-Tag: noindex, nofollow` y una `Content-Security-Policy` con
+        `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`.
+        Sin scripts en línea.
+      parameters:
+        - $ref: "#/components/parameters/Token"
+      security: []
+      responses:
+        "200":
+          description: Página de descarga.
+          content:
+            text/html:
+              schema: { type: string }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /s/{token}/meta:
+    get:
+      tags: [Descarga]
+      operationId: getPublicMeta
+      summary: Estado del enlace y metadatos cifrados
+      description: |
+        Es la única operación que distingue enlace inexistente (404), vencido o revocado (410),
+        agotado (410) y aún no listo (409 `link_not_ready`, mientras se sube).
+      parameters:
+        - $ref: "#/components/parameters/Token"
+      security: []
+      responses:
+        "200":
+          description: Enlace activo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicMeta" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /s/{token}/blob:
+    get:
+      tags: [Descarga]
+      operationId: downloadBlob
+      summary: Descarga el paquete cifrado
+      description: |
+        Sirve los bytes del paquete CPK1 tal como se subieron. Admite `Range` de un solo
+        intervalo y responde 206 con `Content-Range`. Cabeceras: `Content-Type:
+        application/octet-stream`, `Accept-Ranges: bytes`, `Cache-Control: no-store`,
+        `Content-Disposition` ausente (el nombre real está cifrado en los metadatos).
+        Ver las reglas de conteo de `maxDownloads` en la descripción general.
+      parameters:
+        - $ref: "#/components/parameters/Token"
+        - name: Range
+          in: header
+          required: false
+          schema: { type: string, example: "bytes=0-" }
+      security: []
+      responses:
+        "200":
+          description: Paquete completo.
+          headers:
+            Accept-Ranges:
+              schema: { type: string, enum: [bytes] }
+            Content-Length:
+              schema: { type: integer, format: int64 }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "206":
+          description: Intervalo del paquete.
+          headers:
+            Content-Range:
+              schema: { type: string, example: "bytes 0-1048575/524296032" }
+            Content-Length:
+              schema: { type: integer, format: int64 }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "416":
+          description: Intervalo no satisfacible.
+          headers:
+            Content-Range:
+              schema: { type: string, example: "bytes */524296032" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CloudError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+components:
+  securitySchemes:
+    capatazHmac:
+      type: apiKey
+      in: header
+      name: X-Capataz-Signature
+      description: |
+        Firma HMAC-SHA256 de la petición; ver "Autenticación de la API de instancia"
+        en la descripción general. Requiere además las cabeceras `X-Capataz-Instance`,
+        `X-Capataz-Timestamp`, `X-Capataz-Nonce` y `X-Capataz-Content-SHA256`.
+
+  parameters:
+    Instance:
+      name: X-Capataz-Instance
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 64 }
+      description: Identificador de la instancia (el `instanceId` de Capataz).
+    Timestamp:
+      name: X-Capataz-Timestamp
+      in: header
+      required: true
+      schema: { type: integer, format: int64 }
+      description: Segundos Unix UTC.
+    Nonce:
+      name: X-Capataz-Nonce
+      in: header
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{22}$" }
+      description: 16 bytes aleatorios en base64url sin relleno.
+    ContentSha256:
+      name: X-Capataz-Content-SHA256
+      in: header
+      required: true
+      schema: { type: string, pattern: "^[0-9a-f]{64}$" }
+      description: SHA-256 del cuerpo en hexadecimal minúscula.
+    Signature:
+      name: X-Capataz-Signature
+      in: header
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+      description: HMAC-SHA256 en base64url sin relleno.
+    LinkId:
+      name: linkId
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{8,64}$" }
+      description: Identificador del enlace; lo genera Capataz y es el mismo de su API (`/links/{id}`).
+    Token:
+      name: token
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+      description: 32 bytes aleatorios en base64url. Capataz lo genera y la nube solo conoce su SHA-256.
+
+  schemas:
+    CloudErrorCode:
+      type: string
+      enum:
+        - unauthorized
+        - unknown_instance
+        - invalid_signature
+        - timestamp_out_of_window
+        - replayed_nonce
+        - checksum_mismatch
+        - invalid_request
+        - not_found
+        - conflict
+        - parts_missing
+        - payload_too_large
+        - quota_exceeded
+        - link_not_ready
+        - link_expired
+        - link_revoked
+        - downloads_exhausted
+        - rate_limited
+        - internal_error
+
+    CloudError:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { $ref: "#/components/schemas/CloudErrorCode" }
+        message: { type: string }
+        requestId: { type: string }
+        serverTime:
+          type: integer
+          format: int64
+          description: Segundos Unix UTC del servidor; solo en `timestamp_out_of_window`.
+        missingParts:
+          type: array
+          items: { type: integer }
+          description: Solo en `parts_missing`.
+
+    CloudLimits:
+      type: object
+      required: [maxEncryptedBytes, minPartSize, maxPartSize, maxTtlSeconds, minTtlSeconds, maxActiveLinks, maxStoredBytes]
+      properties:
+        maxEncryptedBytes: { type: integer, format: int64, example: 524296032, description: Tope de un paquete CPK1 (500 MiB de contenido más cabecera y etiquetas). }
+        minPartSize:       { type: integer, example: 1048576 }
+        maxPartSize:       { type: integer, example: 8388608 }
+        minTtlSeconds:     { type: integer, example: 3600 }
+        maxTtlSeconds:     { type: integer, example: 2592000 }
+        maxActiveLinks:    { type: integer }
+        maxStoredBytes:    { type: integer, format: int64, description: Cupo total de bytes cifrados vigentes por instancia. }
+
+    CloudUsage:
+      type: object
+      required: [activeLinks, storedBytes]
+      properties:
+        activeLinks: { type: integer }
+        storedBytes: { type: integer, format: int64 }
+
+    CloudInstance:
+      type: object
+      required: [instanceId, serverTime, limits, usage]
+      properties:
+        instanceId: { type: string }
+        serverTime: { type: integer, format: int64, description: Segundos Unix UTC del servidor. }
+        limits:     { $ref: "#/components/schemas/CloudLimits" }
+        usage:      { $ref: "#/components/schemas/CloudUsage" }
+
+    CloudLinkState:
+      type: string
+      description: |
+        `uploading`: se están subiendo partes. `active`: sirve descargas. `expired`: venció
+        por tiempo. `exhausted`: se agotó `maxDownloads`. `revoked`: lo revocó el titular.
+        `failed`: la subida no pudo completarse (se abortó o falló la verificación).
+      enum: [uploading, active, expired, exhausted, revoked, failed]
+
+    OpenUploadRequest:
+      type: object
+      required: [linkId, tokenHash, expiresAt, cipherVersion, encryptedSize, partSize, metaBlob]
+      properties:
+        linkId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{8,64}$"
+        tokenHash:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: base64url (sin relleno) de SHA-256(token). Debe ser único.
+        expiresAt:
+          type: string
+          format: date-time
+          description: Debe quedar entre `minTtlSeconds` y `maxTtlSeconds` (más 300 s de tolerancia) a partir de la hora del servidor.
+        maxDownloads:
+          type: integer
+          minimum: 1
+          nullable: true
+        cipherVersion:
+          type: string
+          enum: [cpk1]
+        encryptedSize:
+          type: integer
+          format: int64
+          minimum: 48
+          description: Largo exacto del paquete CPK1, cabecera incluida.
+        partSize:
+          type: integer
+          description: Entre `minPartSize` y `maxPartSize`.
+        metaBlob:
+          type: string
+          maxLength: 262144
+          description: Metadatos cifrados (ver formato CPK1, sección 6) en base64url; 192 KiB decodificados como máximo.
+
+    CloudLink:
+      type: object
+      required: [linkId, state, expiresAt, encryptedSize, partSize, partCount, receivedParts, downloads]
+      properties:
+        linkId:        { type: string }
+        state:         { $ref: "#/components/schemas/CloudLinkState" }
+        createdAt:     { type: string, format: date-time }
+        activatedAt:   { type: string, format: date-time, nullable: true }
+        expiresAt:     { type: string, format: date-time }
+        encryptedSize: { type: integer, format: int64 }
+        partSize:      { type: integer }
+        partCount:     { type: integer }
+        receivedParts:
+          type: array
+          items: { type: integer }
+          description: Números de parte ya guardadas, para reanudar.
+        downloads:     { type: integer }
+        maxDownloads:  { type: integer, nullable: true }
+        failureCode:
+          type: string
+          nullable: true
+          description: Solo con `state=failed`.
+
+    CloudLinkList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CloudLink" }
+        nextCursor:
+          type: string
+          nullable: true
+
+    PartReceipt:
+      type: object
+      required: [partNumber, size, sha256]
+      properties:
+        partNumber: { type: integer }
+        size:       { type: integer }
+        sha256:     { type: string, pattern: "^[0-9a-f]{64}$" }
+
+    CompleteRequest:
+      type: object
+      required: [ciphertextSha256]
+      properties:
+        ciphertextSha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256, en hexadecimal, del paquete CPK1 completo.
+
+    PublicMeta:
+      type: object
+      required: [state, expiresAt, encryptedSize, cipherVersion, metaBlob]
+      properties:
+        state:            { type: string, enum: [active] }
+        expiresAt:        { type: string, format: date-time }
+        encryptedSize:    { type: integer, format: int64 }
+        cipherVersion:    { type: string, enum: [cpk1] }
+        metaBlob:         { type: string, description: Metadatos cifrados en base64url. }
+        downloadsRemaining:
+          type: integer
+          nullable: true
+          description: null si no hay tope de descargas.
+
+  responses:
+    AuthError:
+      description: Credenciales o firma inválidas (`unauthorized`, `unknown_instance`, `invalid_signature`, `timestamp_out_of_window`, `replayed_nonce`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    BadRequest:
+      description: Petición mal formada (`invalid_request`, `checksum_mismatch`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    NotFound:
+      description: No existe (`not_found`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    Conflict:
+      description: Conflicto de estado (`conflict`, `parts_missing`, `link_not_ready`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    Gone:
+      description: El enlace ya no está disponible (`link_expired`, `link_revoked`, `downloads_exhausted`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    TooLarge:
+      description: Excede un límite (`payload_too_large`, `quota_exceeded`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    ChecksumFailed:
+      description: El SHA-256 del paquete ensamblado no coincide; el enlace queda en `failed`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    RateLimited:
+      description: Demasiadas peticiones (`rate_limited`).
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
+    InternalError:
+      description: Error interno (`internal_error`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/CloudError" }
