@@ -81,6 +81,8 @@ func (s *Server) routeTable() []route {
 	return []route{
 		{pattern: "GET /instance", handler: s.handleInstance, public: true},
 		{pattern: "GET /folders", handler: s.handleFolders},
+		{pattern: "GET /files", handler: s.handleFiles},
+		{pattern: "GET /files/download", handler: s.handleDownload, ownDeadline: true},
 	}
 }
 
