@@ -61,6 +61,23 @@ archivos, y generar enlaces temporales de solo lectura.
   tarjeta SD), servicios systemd para Syncthing y Capataz.
 - Compilación cruzada a la Pi: GOOS=linux GOARCH=arm64.
 
+## Compilar, ejecutar y probar (capataz/)
+- Requisitos: Go 1.27, solo librería estándar. Módulo
+  github.com/resuelveonline/capataz/capataz. Detalle en capataz/README.md.
+- `make run`: ejecuta con ../.env (opción -env-file; solo desarrollo).
+- `make test`: go test -race ./... (correr también `make vet` y gofmt antes
+  de cada commit).
+- `make build` → bin/capataz; `make build-arm64` → bin/capataz-linux-arm64
+  (GOOS=linux GOARCH=arm64, sin cgo) para la Pi.
+- `scripts/fase1-smoke.sh` (desde la raíz): prueba de humo contra la carpeta
+  "pruebas" en el puerto 18081, incluida la comprobación de que la bitácora
+  no contiene nombres de archivo ni el token.
+- Variables: SYNCTHING_URL, SYNCTHING_API_KEY, CAPATAZ_DEV_TOKEN (≥32),
+  CAPATAZ_STATE_DIR obligatorias; CAPATAZ_LISTEN (127.0.0.1:8080) y
+  CAPATAZ_INSTANCE_NAME opcionales. El entorno real gana sobre el .env.
+- Nunca imprimir el token ni el API key: usar archivos de headers 0600 con
+  `curl -H @archivo`.
+
 ## Convenciones
 - Código y comentarios en español donde ayude (nombres de dominio:
   expediente, enlace, titular); identificadores técnicos en inglés.
@@ -69,6 +86,6 @@ archivos, y generar enlaces temporales de solo lectura.
 
 ## Estado actual
 - Fase 0: completada (API de Syncthing validada con curl).
-- Fase 1 (rama fase-1-servicio): Capataz en Go, solo lectura (GET /instance,
+- Fase 1 (rama fase-1-servicio, implementada): Capataz en Go, solo lectura (GET /instance,
   /folders, /files, /files/download) con token de desarrollo por .env.
 - Después: emparejamiento de dispositivos, enlaces, Capataz Nube.
