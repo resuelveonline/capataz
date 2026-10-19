@@ -2,7 +2,8 @@
 
 Servicio en Go que corre junto a Syncthing en el host y expone la API de
 Capataz (contrato: [`../api/capataz-api.yaml`](../api/capataz-api.yaml)).
-Fase 1: **solo lectura**.
+Fase 1: API de **solo lectura**. Fase 2a: orden local `capataz prepare` que
+arma y cifra el paquete de un enlace (sin red ni Capataz Nube todavía).
 
 | Ruta | Auth | Qué hace |
 |---|---|---|
@@ -37,6 +38,7 @@ siempre tiene prioridad sobre el `.env`.
 | `CAPATAZ_STATE_DIR` | sí | estado de la instancia, p. ej. `~/capataz-host/state` |
 | `CAPATAZ_LISTEN` | no | dirección de escucha, por defecto `127.0.0.1:8080` |
 | `CAPATAZ_INSTANCE_NAME` | no | nombre público en `GET /instance`, por defecto `Capataz` |
+| `CAPATAZ_STAGING_DIR` | no | copias congeladas temporales, por defecto `~/capataz-host/staging`; debe ser 0700 y estar fuera de toda carpeta sincronizada |
 
 Si falta alguna obligatoria, el servicio no arranca y el mensaje nombra la
 variable, nunca su valor.
@@ -81,6 +83,53 @@ Variables opcionales: `SMOKE_FOLDER` (id, por defecto `fgyww-edjwa`),
 `SMOKE_LABEL` (`pruebas`), `SMOKE_FOLDER_PATH`
 (`~/capataz-dev/sync/pruebas`) y `SMOKE_PORT` (`18081`). La carpeta necesita
 en la raíz al menos un archivo de 4 bytes o más.
+
+## Fase 2a: preparar un paquete cifrado
+
+```sh
+capataz/bin/capataz prepare -env-file .env --folder fgyww-edjwa \
+    --path subcarpeta --path uno.txt --out /tmp/paquete [--label "Entrega"] [--print-key]
+```
+
+1. **Copia congelada** (`internal/stage`): cada ruta se resuelve sin seguir
+   enlaces simbólicos, se fuerza `db/scan?sub=`, se espera a que el índice
+   alcance al disco y se valida cada archivo contra `db/file` y `db/need`.
+   Después se copia de verdad al staging, se re-verifica el origen y se
+   reintenta hasta 3 veces si cambió.
+2. **Carga útil** (`internal/bundle`): un archivo tal cual, o un ZIP si hay
+   varios elementos o una carpeta. Tope: 524 288 000 bytes de carga útil.
+3. **Paquete** (`internal/cpk`): CPK1 según
+   [`../docs/formato-paquete-cifrado.md`](../docs/formato-paquete-cifrado.md).
+
+En `--out` (0700, fuera de las carpetas sincronizadas, nunca se sobrescribe)
+quedan `package.cpk1`, `meta.b64` (metaBlob en base64url) y `manifest.json`
+(linkId, tamaños, SHA-256 de carga útil y paquete, omitidos por motivo). El
+manifiesto **no** lleva nombres ni la clave. La clave solo sale por stdout,
+una vez, con `--print-key` (para pruebas); nunca va a la bitácora.
+
+Descifrar como lo hará el navegador (Web Crypto, sin dependencias):
+
+```sh
+capataz/bin/capataz prepare ... --print-key > /tmp/clave   # con umask 077
+node scripts/cpk1-verify.mjs --package /tmp/paquete/package.cpk1 --key-file /tmp/clave \
+    --meta /tmp/paquete/meta.b64 --out /tmp/claro [--meta-out /tmp/meta.json]
+node scripts/cpk1-verify.mjs --vectors docs/vectores-cpk1.json   # vectores y casos negativos
+```
+
+La clave se lee de un archivo o de stdin (`-`), nunca de un argumento.
+
+### Prueba de humo de la Fase 2a
+
+```sh
+scripts/fase2a-smoke.sh
+```
+
+Crea contenido en `pruebas/_smoke-fase2a/` (con un marcador; se borra
+siempre al salir), prepara un archivo de 3 MiB + 1 byte, una carpeta, nombres
+con ñ en NFC y NFD y varios elementos; descifra cada paquete con
+`cpk1-verify.mjs`, compara SHA-256 con el original y prueba los ZIP con
+`unzip -t`. Termina comprobando casos de error, que la bitácora no contenga
+nombres ni claves y que el staging quede vacío.
 
 ## Probar desde otro equipo de la red
 
@@ -136,6 +185,36 @@ la instancia pasa a ser otra.
 - 405 y 412 salen como `invalid_request` y todavía no están documentados en
   el contrato (pendiente v0.2.3).
 
+## Limitaciones de la Fase 2a
+
+- **Solo local:** no hay `POST /links`, no se sube nada a Capataz Nube ni se
+  guarda la clave o el linkId; `capataz prepare` es una orden de desarrollo.
+  Una ejecución usa una sola carpeta de Syncthing (`stage` ya admite varias).
+- **Una consulta a `db/file` por archivo:** carpetas con miles de archivos
+  tardan en validarse.
+- **Congelado archivo por archivo:** cada archivo se verifica al copiarlo,
+  pero el conjunto no es una instantánea atómica (un archivo ya copiado puede
+  cambiar mientras se copia el siguiente).
+- **Enlaces simbólicos nunca se siguen** (a diferencia del listado y la
+  descarga de la Fase 1): seleccionado directamente es `path_not_allowed`;
+  dentro de una carpeta se omite y se cuenta.
+- **Omitidos solo se cuentan** en el manifiesto (ignored, hidden, symlink,
+  special); el aviso al titular llegará con los enlaces.
+- **Colisiones de mayúsculas** solo se resuelven en el primer nivel del ZIP.
+  Dentro de una carpeta de un sistema que las distingue (ext4 en la Pi),
+  `A.txt` y `a.txt` chocarían al descomprimir en macOS o Windows.
+- **El ZIP no conserva** atributos extendidos, permisos (todo 0644) ni
+  bifurcaciones de recursos de macOS.
+- **Disco:** hace falta espacio para el archivo más grande + 2 × la carga útil
+  + 64 MiB; si no hay, `insufficient_storage` (código pendiente del contrato
+  v0.2.3).
+- **`cpk.Decrypt` escribe en flujo:** quien lo use directamente debe
+  descartar la salida si devuelve error (`DecryptFile` y `cpk1-verify.mjs` ya
+  lo hacen).
+- **Sin medir en la Raspberry Pi:** la Pi 4 no tiene extensiones
+  criptográficas ARMv8, así que AES-GCM irá bastante más lento que en la Mac
+  (la Pi 5 sí las tiene). NFC/NFD solo se probó en APFS.
+
 ## Decisiones de diseño (resumen)
 
 Detalle en [`../docs/decisiones.md`](../docs/decisiones.md).
@@ -161,11 +240,15 @@ Detalle en [`../docs/decisiones.md`](../docs/decisiones.md).
 ## Estructura
 
 ```
-cmd/capataz/        main: configuración, estado, servidor HTTP y apagado ordenado
+cmd/capataz/        main: servidor HTTP (sin subcomando) y `capataz prepare`
 internal/config/    variables de entorno y lector de .env (solo desarrollo)
 internal/state/     instanceId en CAPATAZ_STATE_DIR/instance.json
 internal/syncthing/ cliente de config/folders, db/file, db/scan y db/need
 internal/safepath/  validación de rutas y acceso al disco con os.Root
 internal/auth/      interfaz Authenticator y DevToken
 internal/api/       rutas, middleware, errores JSON y handlers
+internal/cpk/       formato CPK1: cifrado y descifrado en flujo, metadatos, clave
+internal/stage/     copia congelada validada contra Syncthing (stagetest: Syncthing falso)
+internal/bundle/    carga útil: archivo o ZIP, tope y JSON de metadatos
+internal/prepare/   orquestación de stage → bundle → cpk y salida del paquete
 ```

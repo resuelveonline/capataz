@@ -76,11 +76,18 @@ archivos, y generar enlaces temporales de solo lectura.
 - `scripts/fase1-smoke.sh` (desde la raíz): prueba de humo contra la carpeta
   "pruebas" en el puerto 18081, incluida la comprobación de que la bitácora
   no contiene nombres de archivo ni el token.
+- `capataz prepare --folder ID --path RUTA ... --out DIR [--print-key]`
+  (Fase 2a): copia congelada, ZIP y paquete CPK1 en local.
+  `node scripts/cpk1-verify.mjs` lo descifra con Web Crypto (y `--vectors`
+  valida docs/vectores-cpk1.json). `scripts/fase2a-smoke.sh` lo prueba todo
+  contra "pruebas" en `pruebas/_smoke-fase2a/` (se borra al salir).
 - Variables: SYNCTHING_URL, SYNCTHING_API_KEY, CAPATAZ_DEV_TOKEN (≥32),
-  CAPATAZ_STATE_DIR obligatorias; CAPATAZ_LISTEN (127.0.0.1:8080) y
-  CAPATAZ_INSTANCE_NAME opcionales. El entorno real gana sobre el .env.
-- Nunca imprimir el token ni el API key: usar archivos de headers 0600 con
-  `curl -H @archivo`.
+  CAPATAZ_STATE_DIR obligatorias; CAPATAZ_LISTEN (127.0.0.1:8080),
+  CAPATAZ_INSTANCE_NAME y CAPATAZ_STAGING_DIR (~/capataz-host/staging, 0700)
+  opcionales. El entorno real gana sobre el .env.
+- Nunca imprimir el token, el API key ni la clave K: usar archivos 0600
+  (`curl -H @archivo`, `--key-file`). Nombres, rutas y contenido tampoco van a
+  bitácora, errores ni mensajes de commit.
 
 ## Convenciones
 - Código y comentarios en español donde ayude (nombres de dominio:
@@ -92,4 +99,7 @@ archivos, y generar enlaces temporales de solo lectura.
 - Fase 0: completada (API de Syncthing validada con curl).
 - Fase 1 (rama fase-1-servicio, implementada): Capataz en Go, solo lectura (GET /instance,
   /folders, /files, /files/download) con token de desarrollo por .env.
-- Después: emparejamiento de dispositivos, enlaces, Capataz Nube.
+- Fase 2a (rama fase-2a-paquete, implementada): copia congelada, ZIP y
+  cifrado CPK1 en local con `capataz prepare`; sin red ni Capataz Nube.
+- Después: subida a Capataz Nube y POST /links (2b), emparejamiento de
+  dispositivos.
