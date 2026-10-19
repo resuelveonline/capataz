@@ -215,8 +215,56 @@ func TestNeed(t *testing.T) {
 	if f.last.URL.Path != "/rest/db/need" || f.last.URL.Query().Get("folder") != "fgyww-edjwa" {
 		t.Errorf("petición %s?%s", f.last.URL.Path, f.last.URL.RawQuery)
 	}
-	if len(got.Progress) != 1 || got.Progress[0].Name != "grande.iso" || len(got.Rest) != 1 || got.PerPage != 65536 {
+	if len(got.Progress) != 1 || got.Progress[0].Name != "grande.iso" || len(got.Rest) != 1 || got.PerPage != needPerPage {
 		t.Errorf("Need = %+v", got)
+	}
+}
+
+func TestNeedPaginates(t *testing.T) {
+	old := needPerPage
+	needPerPage = 2
+	t.Cleanup(func() { needPerPage = old })
+
+	var pages []string
+	c, _ := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		pages = append(pages, q.Get("page")+"/"+q.Get("perpage"))
+		switch q.Get("page") {
+		case "1":
+			jsonBody(w, `{"progress":[{"name":"a"}],"queued":[{"name":"b"}],"rest":[]}`)
+		case "2":
+			jsonBody(w, `{"progress":[],"queued":[],"rest":[{"name":"c"},{"name":"d"}]}`)
+		default:
+			jsonBody(w, `{"progress":[],"queued":[],"rest":[{"name":"e"}]}`)
+		}
+	})
+	got, err := c.Need(context.Background(), "fgyww-edjwa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pages, ",") != "1/2,2/2,3/2" {
+		t.Errorf("páginas pedidas %v", pages)
+	}
+	if len(got.Progress) != 1 || len(got.Queued) != 1 || len(got.Rest) != 3 {
+		t.Errorf("Need = %+v", got)
+	}
+}
+
+func TestFileLocalFlagsAndFolderWindow(t *testing.T) {
+	c, _ := newFake(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/config/folders" {
+			jsonBody(w, `[{"id":"x","label":"x","path":"/x","modTimeWindowS":2}]`)
+			return
+		}
+		jsonBody(w, `{"global":{"name":"a","localFlags":0},"local":{"name":"a","localFlags":8}}`)
+	})
+	fs, err := c.Folders(context.Background())
+	if err != nil || fs[0].ModTimeWindowS != 2 {
+		t.Errorf("modTimeWindowS: %+v, %v", fs, err)
+	}
+	f, err := c.File(context.Background(), "x", "a")
+	if err != nil || f.Local.LocalFlags != 8 {
+		t.Errorf("localFlags: %+v, %v", f.Local, err)
 	}
 }
 
