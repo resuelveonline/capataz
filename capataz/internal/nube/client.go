@@ -90,12 +90,9 @@ type Client struct {
 // New crea un cliente para baseURL (p. ej. https://sync.softmx.net). Exige
 // https salvo en loopback, que solo se usa en desarrollo y pruebas.
 func New(baseURL, instanceID string, key []byte) (*Client, error) {
-	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("nube: URL base inválida")
-	}
-	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopback(u.Hostname())) {
-		return nil, errors.New("nube: la URL base debe ser https")
+	u, err := parseBaseURL(baseURL)
+	if err != nil {
+		return nil, err
 	}
 	if len(key) != KeySize {
 		return nil, errors.New("nube: la clave de instancia debe medir 32 bytes")
@@ -115,6 +112,23 @@ func New(baseURL, instanceID string, key []byte) (*Client, error) {
 		},
 		now: time.Now,
 	}, nil
+}
+
+// CheckBaseURL valida una URL base con las mismas reglas que New.
+func CheckBaseURL(baseURL string) error {
+	_, err := parseBaseURL(baseURL)
+	return err
+}
+
+func parseBaseURL(baseURL string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("nube: URL base inválida")
+	}
+	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopback(u.Hostname())) {
+		return nil, errors.New("nube: la URL base debe ser https")
+	}
+	return u, nil
 }
 
 // BaseURL devuelve la URL base, sin "/" final. Con ella se arma la URL

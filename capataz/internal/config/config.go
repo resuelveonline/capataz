@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/resuelveonline/capataz/capataz/internal/nube"
 )
 
 // MinDevTokenLen es la longitud mínima del token de desarrollo.
@@ -21,6 +23,7 @@ const (
 	defaultListen       = "127.0.0.1:8080"
 	defaultInstanceName = "Capataz"
 	defaultStagingDir   = "~/capataz-host/staging"
+	defaultNubeURL      = "https://sync.softmx.net"
 )
 
 // Config es la configuración ya validada.
@@ -32,6 +35,8 @@ type Config struct {
 	StateDir        string // directorio del estado de la instancia (ruta absoluta)
 	StagingDir      string // copias congeladas temporales (ruta absoluta)
 	InstanceName    string // nombre público que devuelve GET /instance
+	NubeURL         string // URL base de Capataz Nube, sin "/" final
+	NubeKey         []byte // secreto: clave de instancia (32 bytes); nil = enlaces desactivados
 }
 
 // LogValue hace que slog nunca imprima los secretos aunque alguien registre
@@ -43,6 +48,8 @@ func (c Config) LogValue() slog.Value {
 		slog.String("stateDir", c.StateDir),
 		slog.String("stagingDir", c.StagingDir),
 		slog.String("instanceName", c.InstanceName),
+		slog.String("nubeURL", c.NubeURL),
+		slog.Bool("nubeKey", c.NubeKey != nil),
 	)
 }
 
@@ -67,6 +74,20 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		Listen:          strings.TrimSpace(getenv("CAPATAZ_LISTEN")),
 		InstanceName:    strings.TrimSpace(getenv("CAPATAZ_INSTANCE_NAME")),
 		StagingDir:      strings.TrimSpace(getenv("CAPATAZ_STAGING_DIR")),
+		NubeURL:         strings.TrimRight(strings.TrimSpace(getenv("CAPATAZ_NUBE_URL")), "/"),
+	}
+	if c.NubeURL == "" {
+		c.NubeURL = defaultNubeURL
+	}
+	if err := nube.CheckBaseURL(c.NubeURL); err != nil {
+		problems = append(problems, "CAPATAZ_NUBE_URL debe ser una URL https sin credenciales (http solo en loopback)")
+	}
+	if v := strings.TrimSpace(getenv("CAPATAZ_NUBE_KEY")); v != "" {
+		key, err := nube.ParseKey(v)
+		if err != nil {
+			problems = append(problems, "CAPATAZ_NUBE_KEY debe ser de 32 bytes en base64url")
+		}
+		c.NubeKey = key
 	}
 	if c.StagingDir == "" {
 		c.StagingDir = defaultStagingDir
