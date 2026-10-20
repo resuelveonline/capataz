@@ -23,7 +23,13 @@ archivos, y generar enlaces temporales de solo lectura.
   justificación previa.
 - Las apps Flutter son clientes de la API, sin embeber Syncthing y sin trabajo
   sin conexión en la v1 (confirmado).
-- Capataz solo abre conexiones salientes; nunca exige puertos abiertos.
+- Capataz no acepta conexiones iniciadas desde Internet ni desde Capataz
+  Nube: es el host quien se conecta a la nube para subir, nunca al revés.
+  Tampoco se abren puertos en el router. Los clientes (apps, portal web,
+  computadoras) llegan al host por la red local o por un canal privado. Cuál
+  será ese canal fuera de casa sigue pendiente (propuesto: Tailscale;
+  alternativa: un túnel que abra el propio host hacia afuera, p. ej.
+  Cloudflare Tunnel).
 - Capataz Nube (Laravel, hosting compartido en https://sync.softmx.net) sirve
   las descargas públicas de los enlaces y es la autoridad de vencimiento.
 - La instancia tiene un instanceId propio, generado en el primer arranque y

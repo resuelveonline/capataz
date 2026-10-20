@@ -156,11 +156,19 @@
   Capataz es la capa de presentación, permisos y enlaces temporales. Una
   computadora que quiera copia local ejecuta su propio Syncthing, independiente
   de Capataz. Los enlaces temporales se piden siempre al host.
+- Capataz no acepta conexiones iniciadas desde Internet ni desde Capataz
+  Nube: es el host quien se conecta a la nube para subir, nunca al revés.
+  Tampoco se abren puertos en el router. Los clientes (apps, portal web,
+  computadoras) llegan al host por la red local o por un canal privado. Cuál
+  será ese canal fuera de casa sigue pendiente (propuesto: Tailscale;
+  alternativa: un túnel que abra el propio host hacia afuera, p. ej.
+  Cloudflare Tunnel).
 
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
-- Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo).
+- Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo;
+  alternativa: un túnel saliente que abra el propio host, p. ej. Cloudflare Tunnel).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
 - Contrato v0.2.3 de Capataz: 304, 405 y 412 documentados (hoy 405 y 412 salen
   como invalid_request; 304 lo genera ServeContent con If-Modified-Since);
