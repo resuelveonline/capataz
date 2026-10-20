@@ -262,10 +262,9 @@ func (s *Server) instance(w http.ResponseWriter) {
 	var u nube.Usage
 	for _, l := range s.links {
 		s.expire(l)
+		// C4 (contrato v0.1.1): uploading también ocupa cupo y cuenta.
 		if l.state == nube.StateActive || l.state == nube.StateUploading {
-			if l.state == nube.StateActive {
-				u.ActiveLinks++
-			}
+			u.ActiveLinks++
 			u.StoredBytes += l.req.EncryptedSize
 		}
 	}

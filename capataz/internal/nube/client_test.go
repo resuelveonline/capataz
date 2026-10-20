@@ -97,6 +97,12 @@ func TestInstanceAndSignature(t *testing.T) {
 	if inst.InstanceID != instanceID || inst.Limits.MaxPartSize != 8<<20 {
 		t.Errorf("instancia inesperada: %+v", inst)
 	}
+	if _, err := c.OpenUpload(context.Background(), openReq("enlace-cuenta-01", 1<<20, 1<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if inst, _ := c.Instance(context.Background()); inst.Usage.ActiveLinks != 1 || inst.Usage.StoredBytes != 1<<20 {
+		t.Errorf("uploading debe contar en usage: %+v", inst.Usage)
+	}
 
 	// Otra clave: la firma no vale.
 	other, _ := nube.New(c.BaseURL(), instanceID, randomBytes(32))
