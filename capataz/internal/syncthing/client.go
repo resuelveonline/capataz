@@ -76,6 +76,9 @@ type Folder struct {
 	Type           string `json:"type"`
 	Paused         bool   `json:"paused"`
 	FilesystemType string `json:"filesystemType"`
+	// ModTimeWindowS es la tolerancia en segundos al comparar fechas de
+	// modificación (2 en FAT/exFAT, 0 en APFS y ext4).
+	ModTimeWindowS int `json:"modTimeWindowS"`
 }
 
 // FileInfo es la vista de un archivo en el índice (campos que usa Capataz).
@@ -88,6 +91,7 @@ type FileInfo struct {
 	Ignored    bool      `json:"ignored"`
 	Invalid    bool      `json:"invalid"`
 	MustRescan bool      `json:"mustRescan"`
+	LocalFlags uint32    `json:"localFlags"` // distinto de 0: no sincronizable tal cual
 	Sequence   int64     `json:"sequence"`
 	Version    []string  `json:"version"`
 }
@@ -140,10 +144,28 @@ func (c *Client) Scan(ctx context.Context, folder, sub string) error {
 	return checkStatus(resp, "db/scan")
 }
 
-// Need consulta GET /rest/db/need (primera página, hasta 65536 elementos).
+// needPerPage es el tamaño de página que se pide a db/need.
+var needPerPage = 10000
+
+// Need consulta GET /rest/db/need recorriendo todas las páginas.
 func (c *Client) Need(ctx context.Context, folder string) (Need, error) {
-	var out Need
-	return out, c.getJSON(ctx, "db/need", url.Values{"folder": {folder}}, &out)
+	var all Need
+	for page := 1; ; page++ {
+		var p Need
+		q := url.Values{"folder": {folder}, "page": {fmt.Sprint(page)}, "perpage": {fmt.Sprint(needPerPage)}}
+		if err := c.getJSON(ctx, "db/need", q, &p); err != nil {
+			return Need{}, err
+		}
+		all.Progress = append(all.Progress, p.Progress...)
+		all.Queued = append(all.Queued, p.Queued...)
+		all.Rest = append(all.Rest, p.Rest...)
+		// Syncthing reparte perpage entre las tres listas; una página
+		// incompleta es la última.
+		if len(p.Progress)+len(p.Queued)+len(p.Rest) < needPerPage {
+			all.Page, all.PerPage = page, needPerPage
+			return all, nil
+		}
+	}
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint string, q url.Values, out any) error {

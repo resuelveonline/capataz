@@ -44,6 +44,26 @@ func TestFromEnvValid(t *testing.T) {
 	if want := filepath.Join(home, "capataz-host/state"); c.StateDir != want {
 		t.Errorf("StateDir = %q, quiero %q", c.StateDir, want)
 	}
+	if want := filepath.Join(home, "capataz-host/staging"); c.StagingDir != want {
+		t.Errorf("StagingDir por defecto = %q, quiero %q", c.StagingDir, want)
+	}
+}
+
+func TestStagingDir(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	for in, want := range map[string]string{
+		"":                  filepath.Join(home, "capataz-host/staging"), // vacía: por defecto
+		"   ":               filepath.Join(home, "capataz-host/staging"),
+		"~/otra/staging":    filepath.Join(home, "otra/staging"),
+		"/var/tmp/staging/": "/var/tmp/staging",
+	} {
+		env := validEnv()
+		env["CAPATAZ_STAGING_DIR"] = in
+		c, err := FromEnv(envOf(env))
+		if err != nil || c.StagingDir != want {
+			t.Errorf("CAPATAZ_STAGING_DIR=%q: %q, %v; quiero %q", in, c.StagingDir, err, want)
+		}
+	}
 }
 
 func TestFromEnvErrors(t *testing.T) {

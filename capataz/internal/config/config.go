@@ -20,6 +20,7 @@ const MinDevTokenLen = 32
 const (
 	defaultListen       = "127.0.0.1:8080"
 	defaultInstanceName = "Capataz"
+	defaultStagingDir   = "~/capataz-host/staging"
 )
 
 // Config es la configuración ya validada.
@@ -29,6 +30,7 @@ type Config struct {
 	Listen          string // dirección host:puerto del servidor HTTP
 	DevToken        string // secreto: token temporal de desarrollo
 	StateDir        string // directorio del estado de la instancia (ruta absoluta)
+	StagingDir      string // copias congeladas temporales (ruta absoluta)
 	InstanceName    string // nombre público que devuelve GET /instance
 }
 
@@ -39,6 +41,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("syncthingURL", c.SyncthingURL),
 		slog.String("listen", c.Listen),
 		slog.String("stateDir", c.StateDir),
+		slog.String("stagingDir", c.StagingDir),
 		slog.String("instanceName", c.InstanceName),
 	)
 }
@@ -63,6 +66,10 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		StateDir:        required("CAPATAZ_STATE_DIR"),
 		Listen:          strings.TrimSpace(getenv("CAPATAZ_LISTEN")),
 		InstanceName:    strings.TrimSpace(getenv("CAPATAZ_INSTANCE_NAME")),
+		StagingDir:      strings.TrimSpace(getenv("CAPATAZ_STAGING_DIR")),
+	}
+	if c.StagingDir == "" {
+		c.StagingDir = defaultStagingDir
 	}
 	if c.Listen == "" {
 		c.Listen = defaultListen
@@ -81,20 +88,30 @@ func FromEnv(getenv func(string) string) (Config, error) {
 		problems = append(problems, fmt.Sprintf("CAPATAZ_DEV_TOKEN debe tener al menos %d caracteres", MinDevTokenLen))
 	}
 	if c.StateDir != "" {
-		dir, err := ExpandHome(c.StateDir)
-		if err == nil {
-			dir, err = filepath.Abs(dir)
-		}
+		dir, err := absDir(c.StateDir)
 		if err != nil {
 			problems = append(problems, "CAPATAZ_STATE_DIR no es una ruta válida")
 		}
 		c.StateDir = dir
+	}
+	if dir, err := absDir(c.StagingDir); err != nil {
+		problems = append(problems, "CAPATAZ_STAGING_DIR no es una ruta válida")
+	} else {
+		c.StagingDir = dir
 	}
 
 	if len(problems) > 0 {
 		return Config{}, errors.New("configuración inválida: " + strings.Join(problems, "; "))
 	}
 	return c, nil
+}
+
+func absDir(p string) (string, error) {
+	dir, err := ExpandHome(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(dir)
 }
 
 // ExpandHome sustituye un "~" inicial por el directorio del usuario.

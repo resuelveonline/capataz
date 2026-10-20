@@ -1,4 +1,7 @@
 // Comando capataz: servicio de la API de Capataz junto a Syncthing.
+//
+//	capataz [-env-file F]                    arranca el servidor HTTP
+//	capataz prepare [opciones]               prepara un paquete CPK1 (desarrollo)
 package main
 
 import (
@@ -6,17 +9,22 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/resuelveonline/capataz/capataz/internal/api"
 	"github.com/resuelveonline/capataz/capataz/internal/auth"
 	"github.com/resuelveonline/capataz/capataz/internal/config"
+	"github.com/resuelveonline/capataz/capataz/internal/cpk"
+	"github.com/resuelveonline/capataz/capataz/internal/prepare"
+	"github.com/resuelveonline/capataz/capataz/internal/stage"
 	"github.com/resuelveonline/capataz/capataz/internal/state"
 	"github.com/resuelveonline/capataz/capataz/internal/syncthing"
 )
@@ -27,22 +35,40 @@ var version = "dev"
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
-	if err := run(logger); err != nil {
-		logger.Error("capataz no pudo arrancar", "error", err)
+
+	args := os.Args[1:]
+	var err error
+	if len(args) > 0 && args[0] == "prepare" {
+		err = runPrepare(context.Background(), logger, args[1:], os.Getenv, os.Stdout)
+	} else {
+		err = runServe(logger, args)
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(2)
+	}
+	if err != nil {
+		logger.Error("capataz terminó con error", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger) error {
-	envFile := flag.String("env-file", "", "archivo .env a cargar (solo desarrollo)")
-	flag.Parse()
-
-	if *envFile != "" {
-		if err := config.LoadDotEnv(*envFile); err != nil {
-			return fmt.Errorf("cargando %s: %w", *envFile, err)
+// loadConfig carga el .env (si se pidió) y valida la configuración.
+func loadConfig(envFile string, getenv func(string) string) (config.Config, error) {
+	if envFile != "" {
+		if err := config.LoadDotEnv(envFile); err != nil {
+			return config.Config{}, fmt.Errorf("cargando el archivo de entorno: %w", err)
 		}
 	}
-	cfg, err := config.FromEnv(os.Getenv)
+	return config.FromEnv(getenv)
+}
+
+func runServe(log *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("capataz", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "archivo .env a cargar (solo desarrollo)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := loadConfig(*envFile, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -108,6 +134,72 @@ func run(log *slog.Logger) error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return err
+	}
+	return nil
+}
+
+// paths acumula --path repetidos.
+type paths []string
+
+func (p *paths) String() string     { return fmt.Sprint(len(*p), " rutas") } // sin las rutas
+func (p *paths) Set(v string) error { *p = append(*p, v); return nil }
+
+// runPrepare implementa "capataz prepare". La clave solo sale por stdout,
+// una vez, y solo con --print-key; nunca por la bitácora (stderr).
+func runPrepare(ctx context.Context, log *slog.Logger, args []string, getenv func(string) string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("capataz prepare", flag.ContinueOnError)
+	envFile := fs.String("env-file", "", "archivo .env a cargar (solo desarrollo)")
+	folder := fs.String("folder", "", "id de la carpeta de Syncthing (obligatorio)")
+	var ps paths
+	fs.Var(&ps, "path", "ruta dentro de la carpeta; repetible (obligatorio)")
+	out := fs.String("out", "", "directorio de salida, fuera de las carpetas sincronizadas (obligatorio)")
+	label := fs.String("label", "", "etiqueta opcional del enlace")
+	printKey := fs.Bool("print-key", false, "imprime la clave en stdout (solo pruebas)")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "uso: capataz prepare --folder ID --path RUTA [--path RUTA...] --out DIR [--label TEXTO] [--print-key] [-env-file .env]")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *folder == "" || len(ps) == 0 || *out == "" || fs.NArg() > 0 {
+		fs.Usage()
+		return flag.ErrHelp
+	}
+
+	cfg, err := loadConfig(*envFile, getenv)
+	if err != nil {
+		return err
+	}
+	st, err := syncthing.New(cfg.SyncthingURL, cfg.SyncthingAPIKey)
+	if err != nil {
+		return err
+	}
+	stager, err := stage.New(stage.Options{
+		Syncthing: st, StagingDir: cfg.StagingDir, MaxPayload: cpk.MaxPayload, Logger: log,
+	})
+	if err != nil {
+		return err
+	}
+	items := make([]stage.Item, len(ps))
+	for i, p := range ps {
+		items[i] = stage.Item{Folder: *folder, Path: p}
+	}
+
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	res, err := prepare.Run(ctx, prepare.Options{
+		Stager: stager, Items: items, OutDir: *out, Label: strings.TrimSpace(*label), Logger: log,
+	})
+	if err != nil {
+		return err
+	}
+	m := res.Manifest
+	sk := m.Skipped
+	log.Info("listo", "linkId", m.LinkID, "kind", m.Kind, "payloadBytes", m.PayloadSize,
+		"packageBytes", m.PackageSize, "omitidos", fmt.Sprintf("ignored=%d hidden=%d symlink=%d special=%d", sk.Ignored, sk.Hidden, sk.Symlink, sk.Special))
+	if *printKey {
+		fmt.Fprintln(stdout, res.Key.Base64URL())
 	}
 	return nil
 }

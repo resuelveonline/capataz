@@ -12,11 +12,24 @@ archivos, y generar enlaces temporales de solo lectura.
   misma API de Capataz (contrato en api/capataz-api.yaml).
 - Las apps y el portal NUNCA hablan directo con la API de Syncthing; su API key
   vive solo en el host.
+- Arquitectura de acceso: un solo portal, el del host de Syncthing. Las apps
+  móviles (Android e iOS), el portal web y cualquier computadora acceden
+  llamando a la API de Capataz del host; no hay un portal por dispositivo.
+  Syncthing es responsable de la sincronización y de las funciones core;
+  Capataz es la capa de presentación, permisos y enlaces temporales. Una
+  computadora que quiera copia local ejecuta su propio Syncthing, independiente
+  de Capataz. Los enlaces temporales se piden siempre al host.
 - Lenguaje de Capataz: Go (confirmado), solo librería estándar salvo
   justificación previa.
 - Las apps Flutter son clientes de la API, sin embeber Syncthing y sin trabajo
   sin conexión en la v1 (confirmado).
-- Capataz solo abre conexiones salientes; nunca exige puertos abiertos.
+- Capataz no acepta conexiones iniciadas desde Internet ni desde Capataz
+  Nube: es el host quien se conecta a la nube para subir, nunca al revés.
+  Tampoco se abren puertos en el router. Los clientes (apps, portal web,
+  computadoras) llegan al host por la red local o por un canal privado. Cuál
+  será ese canal fuera de casa sigue pendiente (propuesto: Tailscale;
+  alternativa: un túnel que abra el propio host hacia afuera, p. ej.
+  Cloudflare Tunnel).
 - Capataz Nube (Laravel, hosting compartido en https://sync.softmx.net) sirve
   las descargas públicas de los enlaces y es la autoridad de vencimiento.
 - La instancia tiene un instanceId propio, generado en el primer arranque y
@@ -64,6 +77,11 @@ archivos, y generar enlaces temporales de solo lectura.
 - Destino futuro: Raspberry Pi, Raspberry Pi OS Lite 64 bits, SSD por USB (no
   tarjeta SD), servicios systemd para Syncthing y Capataz.
 - Compilación cruzada a la Pi: GOOS=linux GOARCH=arm64.
+- Etapa de desarrollo: la Mac mini M4 es el host y emula la Raspberry Pi. Las
+  pruebas de funcionalidad valen para la Pi; las de rendimiento (descargas por
+  sendfile, cifrado, compresión del ZIP, copia a staging) NO se extrapolan y
+  se miden en la Pi cuando exista. Mantener el binario compilable para arm64
+  (make build-arm64) y el uso de memoria constante.
 
 ## Compilar, ejecutar y probar (capataz/)
 - Requisitos: Go 1.27, solo librería estándar. Módulo
@@ -76,11 +94,18 @@ archivos, y generar enlaces temporales de solo lectura.
 - `scripts/fase1-smoke.sh` (desde la raíz): prueba de humo contra la carpeta
   "pruebas" en el puerto 18081, incluida la comprobación de que la bitácora
   no contiene nombres de archivo ni el token.
+- `capataz prepare --folder ID --path RUTA ... --out DIR [--print-key]`
+  (Fase 2a): copia congelada, ZIP y paquete CPK1 en local.
+  `node scripts/cpk1-verify.mjs` lo descifra con Web Crypto (y `--vectors`
+  valida docs/vectores-cpk1.json). `scripts/fase2a-smoke.sh` lo prueba todo
+  contra "pruebas" en `pruebas/_smoke-fase2a/` (se borra al salir).
 - Variables: SYNCTHING_URL, SYNCTHING_API_KEY, CAPATAZ_DEV_TOKEN (≥32),
-  CAPATAZ_STATE_DIR obligatorias; CAPATAZ_LISTEN (127.0.0.1:8080) y
-  CAPATAZ_INSTANCE_NAME opcionales. El entorno real gana sobre el .env.
-- Nunca imprimir el token ni el API key: usar archivos de headers 0600 con
-  `curl -H @archivo`.
+  CAPATAZ_STATE_DIR obligatorias; CAPATAZ_LISTEN (127.0.0.1:8080),
+  CAPATAZ_INSTANCE_NAME y CAPATAZ_STAGING_DIR (~/capataz-host/staging, 0700)
+  opcionales. El entorno real gana sobre el .env.
+- Nunca imprimir el token, el API key ni la clave K: usar archivos 0600
+  (`curl -H @archivo`, `--key-file`). Nombres, rutas y contenido tampoco van a
+  bitácora, errores ni mensajes de commit.
 
 ## Convenciones
 - Código y comentarios en español donde ayude (nombres de dominio:
@@ -92,4 +117,7 @@ archivos, y generar enlaces temporales de solo lectura.
 - Fase 0: completada (API de Syncthing validada con curl).
 - Fase 1 (rama fase-1-servicio, implementada): Capataz en Go, solo lectura (GET /instance,
   /folders, /files, /files/download) con token de desarrollo por .env.
-- Después: emparejamiento de dispositivos, enlaces, Capataz Nube.
+- Fase 2a (rama fase-2a-paquete, implementada): copia congelada, ZIP y
+  cifrado CPK1 en local con `capataz prepare`; sin red ni Capataz Nube.
+- Después: subida a Capataz Nube y POST /links (2b), emparejamiento de
+  dispositivos.
