@@ -64,6 +64,11 @@ archivos, y generar enlaces temporales de solo lectura.
 - Destino futuro: Raspberry Pi, Raspberry Pi OS Lite 64 bits, SSD por USB (no
   tarjeta SD), servicios systemd para Syncthing y Capataz.
 - Compilación cruzada a la Pi: GOOS=linux GOARCH=arm64.
+- Etapa de desarrollo: la Mac mini M4 es el host y emula la Raspberry Pi. Las
+  pruebas de funcionalidad valen para la Pi; las de rendimiento (descargas por
+  sendfile, cifrado, compresión del ZIP, copia a staging) NO se extrapolan y
+  se miden en la Pi cuando exista. Mantener el binario compilable para arm64
+  (make build-arm64) y el uso de memoria constante.
 
 ## Compilar, ejecutar y probar (capataz/)
 - Requisitos: Go 1.27, solo librería estándar. Módulo

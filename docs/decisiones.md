@@ -141,6 +141,13 @@
   linkId, tamaños y SHA-256 de carga útil y paquete, nunca nombres ni K.
   cpk1-verify.mjs lee la clave de un archivo o de stdin, no de argumentos.
 
+## 2026-10-19 (etapa de desarrollo: la Mac emula la Pi)
+- Etapa de desarrollo: la Mac mini M4 es el host y emula la Raspberry Pi. Las
+  pruebas de funcionalidad valen para la Pi; las de rendimiento (descargas por
+  sendfile, cifrado, compresión del ZIP, copia a staging) NO se extrapolan y
+  se miden en la Pi cuando exista. Mantener el binario compilable para arm64
+  (make build-arm64) y el uso de memoria constante.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
@@ -152,7 +159,11 @@
   nube se muestra como expired en Link.status; Link con payloadSha256,
   payloadSize, packageSha256 y packageSize (en lugar de sha256 y sizeBytes,
   ambiguos); código insufficient_storage para disco lleno en el staging.
-- Medir AES-GCM en la Raspberry Pi: la Pi 4 no tiene extensiones
-  criptográficas ARMv8 (la Pi 5 sí).
-- Medir el rendimiento de descargas en la Raspberry Pi: el ResponseWriter
-  envuelto (bitácora y plazo por inactividad) desactiva sendfile.
+- Medir el rendimiento en la Raspberry Pi, anotando el modelo de Pi y el tipo
+  de disco (SSD por USB, tarjeta SD...) de cada medición:
+  - descargas: el ResponseWriter envuelto (bitácora y plazo por inactividad)
+    desactiva sendfile;
+  - cifrado CPK1 (AES-256-GCM): la Pi 4 no tiene extensiones criptográficas
+    ARMv8 y la Pi 5 sí;
+  - deflate del ZIP;
+  - copia a staging.
