@@ -461,7 +461,10 @@ func (m *Manager) reconcile(r *record, cl nube.Link) {
 	case nube.StateRevoked:
 		m.finish(r, StatusRevoked, "")
 	case nube.StateFailed:
-		m.finish(r, StatusFailed, cmp.Or(deref(cl.FailureCode), CodeInternal))
+		// failureCode de la nube es del enum de la nube, no del de Capataz:
+		// solo se anota en la bitácora.
+		m.log.Warn("la nube marcó el enlace como fallido", "linkId", r.ID, "nubeCode", deref(cl.FailureCode))
+		m.finish(r, StatusFailed, CodeCloudUnreach)
 	}
 }
 

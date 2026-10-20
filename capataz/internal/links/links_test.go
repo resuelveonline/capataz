@@ -603,3 +603,18 @@ func TestStorePermissions(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestReconcileCloudFailureCode(t *testing.T) {
+	e := newEnv(t)
+	m := e.open()
+	l, _ := m.Create(context.Background(), owner, req(secretName))
+	l = wait(t, m, l.ID, StatusActive)
+	code := "checksum_mismatch"
+	m.mu.Lock()
+	m.reconcile(m.recs[l.ID], nube.Link{LinkID: l.ID, State: nube.StateFailed, FailureCode: &code})
+	m.mu.Unlock()
+	got, _ := m.Get(l.ID)
+	if got.Status != StatusFailed || deref(got.FailureCode) != CodeCloudUnreach {
+		t.Errorf("estado %q, failureCode %q; quiero failed y %q", got.Status, deref(got.FailureCode), CodeCloudUnreach)
+	}
+}
