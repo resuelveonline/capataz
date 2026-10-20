@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $part_size
  * @property string $meta_blob
  * @property string $request_hash
+ * @property string|null $package_sha256
  * @property string|null $failure_code
  * @property \Illuminate\Support\Carbon|null $activated_at
  * @property \Illuminate\Support\Carbon|null $exhausted_at

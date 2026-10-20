@@ -34,6 +34,8 @@ return new class extends Migration
             $t->longText('meta_blob');
             // SHA-256 del cuerpo de apertura normalizado (idempotencia).
             $t->char('request_hash', 64);
+            // SHA-256 hex del paquete ensamblado, fijado al completar.
+            $t->char('package_sha256', 64)->nullable();
             $t->string('failure_code', 32)->nullable();
             $t->dateTime('activated_at')->nullable();
             $t->dateTime('exhausted_at')->nullable();

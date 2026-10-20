@@ -3,6 +3,7 @@
 // Rutas de Capataz Nube (api/capataz-nube-api.yaml v0.1.1). /v1: API de
 // instancia, firmada con HMAC. /s: descarga pública.
 
+use App\Http\Controllers\CompleteController;
 use App\Http\Controllers\InstanceController;
 use App\Http\Controllers\LinksController;
 use App\Http\Controllers\PartsController;
@@ -14,4 +15,5 @@ Route::middleware('capataz.signed')->prefix('v1')->group(function () {
     Route::get('links', [LinksController::class, 'index']);
     Route::get('links/{linkId}', [LinksController::class, 'show']);
     Route::put('links/{linkId}/parts/{n}', [PartsController::class, 'put']);
+    Route::post('links/{linkId}/complete', [CompleteController::class, 'complete']);
 });
