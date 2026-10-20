@@ -224,6 +224,25 @@
   descargado. Nunca rutas, nombres, etiqueta, token ni clave.
 - La nube falsa (internal/nube/nubetest y cmd/nubefalsa) es solo para
   pruebas y no entra en make build ni en el host.
+- Las cinco decisiones de la fase, revisadas por el titular:
+  1. La clave K de cada enlace vive en el host (0600, en
+     CAPATAZ_STATE_DIR/links) mientras el enlace está vigente, para que
+     GET /links/{id} devuelva la url completa tras la preparación
+     asíncrona. Se borra al vencer, revocar o fallar; Capataz Nube nunca
+     la recibe.
+  2. tokenHash = base64url(SHA-256(texto de 43 caracteres del token)), con
+     el texto tal como viaja en la URL, no los 32 bytes. Vectores en
+     docs/vectores-nube.json; Laravel debe reproducirlos.
+  3. Una preparación cortada por un reinicio no se reanuda: queda failed
+     (internal_error) y el titular crea el enlace de nuevo.
+  4. Como máximo 2 enlaces en preparing o uploading a la vez; el siguiente
+     recibe 429 rate_limited.
+  5. Las descargas llegan al host al conciliar (cada 5 min), no al
+     momento; la fuente exacta es la bitácora de Capataz Nube.
+- Respaldo: CAPATAZ_STATE_DIR contiene las claves K y los tokens de los
+  enlaces vigentes (además del instanceId). Su respaldo (Time Machine o el
+  que lo sustituya en la Pi) debe ir cifrado; quien lea una copia sin
+  cifrar puede abrir cualquier enlace vigente.
 
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.

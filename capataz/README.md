@@ -204,6 +204,9 @@ Nube y los dispositivos emparejados la usarán para reconocerla. Si se pierde,
 la instancia pasa a ser otra.
 
 - Inclúyela en el respaldo (Time Machine en la Mac mini; copia aparte en la Pi).
+- **El respaldo debe ir cifrado:** desde la Fase 2b, `links/` guarda la clave
+  y el token de cada enlace vigente; con una copia sin cifrar se puede abrir
+  cualquiera de ellos.
 - No la pongas en `~/capataz-dev` (datos desechables) ni en el repositorio
   (`.gitignore` la excluye por si acaso).
 - Si el archivo está dañado, Capataz no arranca en lugar de generar una
