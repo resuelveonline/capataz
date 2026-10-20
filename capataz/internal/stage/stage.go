@@ -44,7 +44,6 @@ const (
 	CodeInvalidRequest       = "invalid_request"
 	CodeSyncthingUnavailable = "syncthing_unavailable"
 	CodeInternal             = "internal_error"
-	// CodeInsufficientStorage aún no está en el contrato (pendiente v0.2.3).
 	CodeInsufficientStorage = "insufficient_storage"
 )
 
@@ -219,10 +218,14 @@ func (sn *Snapshot) Dir() string { return sn.dir }
 
 // Close borra la preparación entera y libera las carpetas abiertas.
 func (sn *Snapshot) Close() error {
+	sn.closeRoots()
+	return os.RemoveAll(sn.dir)
+}
+
+func (sn *Snapshot) closeRoots() {
 	for _, r := range sn.roots {
 		r.Close()
 	}
-	return os.RemoveAll(sn.dir)
 }
 
 // Begin resuelve y valida los elementos y planifica la copia, sin copiar
@@ -308,6 +311,52 @@ func (s *Stager) Begin(ctx context.Context, items []Item) (_ *Snapshot, err erro
 	s.log.Info("copia planificada", "elementos", len(items), "archivos", sn.fileCount(),
 		"omitidos", sn.Skipped.Ignored+sn.Skipped.Hidden+sn.Skipped.Symlink+sn.Skipped.Special)
 	return sn, nil
+}
+
+// Check valida rápido los elementos de un enlace antes de aceptarlo: que
+// la carpeta la reporte Syncthing y que cada ruta sea admisible, exista y
+// sea un archivo o una carpeta, sin seguir enlaces simbólicos. No escanea
+// ni copia: el resto lo valida Begin. Devuelve *Error como Begin.
+func (s *Stager) Check(ctx context.Context, items []Item) error {
+	if len(items) == 0 {
+		return newErr(0, CodeInvalidRequest, "no hay elementos", nil)
+	}
+	folders, err := s.st.Folders(ctx)
+	if err != nil {
+		return syncErr(0, err)
+	}
+	byID := map[string]syncthing.Folder{}
+	for _, f := range folders {
+		byID[f.ID] = f
+	}
+	sn := &Snapshot{s: s, roots: map[string]*safepath.Folder{}, windows: map[string]time.Duration{}}
+	defer sn.closeRoots()
+	for i, it := range items {
+		n := i + 1
+		f, ok := byID[it.Folder]
+		if !ok {
+			return newErr(n, CodeNotFound, "carpeta desconocida", nil)
+		}
+		rel, err := safepath.Clean(it.Path)
+		if err != nil {
+			return newErr(n, CodePathNotAllowed, "ruta no permitida", nil)
+		}
+		if safepath.HasHidden(rel) {
+			return newErr(n, CodeNotFound, "no existe", nil)
+		}
+		root, err := sn.root(f)
+		if err != nil {
+			return newErr(n, CodeInternal, "la carpeta no se puede abrir en disco", err)
+		}
+		fi, err := root.StatNoFollow(rel)
+		if err != nil {
+			return pathErr(n, err)
+		}
+		if !fi.Mode().IsRegular() && !fi.IsDir() {
+			return newErr(n, CodeNotFound, "no es un archivo ni una carpeta", nil)
+		}
+	}
+	return nil
 }
 
 // plan resuelve un elemento y añade sus entradas (aún sin validar).

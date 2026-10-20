@@ -5,6 +5,7 @@
 package prepare
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -36,6 +37,7 @@ type Options struct {
 	Items  []stage.Item
 	OutDir string
 	Label  string
+	LinkID string    // por defecto uno nuevo (NewLinkID)
 	Now    time.Time // por defecto time.Now()
 	Logger *slog.Logger
 }
@@ -132,7 +134,7 @@ func Run(ctx context.Context, o Options) (_ *Result, err error) {
 	}
 
 	m := Manifest{
-		LinkID:        newLinkID(),
+		LinkID:        cmp.Or(o.LinkID, NewLinkID()),
 		Kind:          payload.Kind,
 		CipherVersion: "cpk1",
 		ChunkSizeLog2: cpk.DefaultChunkSizeLog2,
@@ -202,9 +204,9 @@ func writeNew(path string, data []byte) error {
 	return err
 }
 
-// newLinkID: 16 bytes aleatorios en base64url (22 caracteres), compatible
+// NewLinkID: 16 bytes aleatorios en base64url (22 caracteres), compatible
 // con el patrón de linkId del contrato de Nube.
-func newLinkID() string {
+func NewLinkID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
