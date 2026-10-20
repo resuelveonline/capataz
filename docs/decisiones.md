@@ -148,6 +148,15 @@
   se miden en la Pi cuando exista. Mantener el binario compilable para arm64
   (make build-arm64) y el uso de memoria constante.
 
+## 2026-10-19 (arquitectura de acceso)
+- Arquitectura de acceso: un solo portal, el del host de Syncthing. Las apps
+  móviles (Android e iOS), el portal web y cualquier computadora acceden
+  llamando a la API de Capataz del host; no hay un portal por dispositivo.
+  Syncthing es responsable de la sincronización y de las funciones core;
+  Capataz es la capa de presentación, permisos y enlaces temporales. Una
+  computadora que quiera copia local ejecuta su propio Syncthing, independiente
+  de Capataz. Los enlaces temporales se piden siempre al host.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.

@@ -12,6 +12,13 @@ archivos, y generar enlaces temporales de solo lectura.
   misma API de Capataz (contrato en api/capataz-api.yaml).
 - Las apps y el portal NUNCA hablan directo con la API de Syncthing; su API key
   vive solo en el host.
+- Arquitectura de acceso: un solo portal, el del host de Syncthing. Las apps
+  móviles (Android e iOS), el portal web y cualquier computadora acceden
+  llamando a la API de Capataz del host; no hay un portal por dispositivo.
+  Syncthing es responsable de la sincronización y de las funciones core;
+  Capataz es la capa de presentación, permisos y enlaces temporales. Una
+  computadora que quiera copia local ejecuta su propio Syncthing, independiente
+  de Capataz. Los enlaces temporales se piden siempre al host.
 - Lenguaje de Capataz: Go (confirmado), solo librería estándar salvo
   justificación previa.
 - Las apps Flutter son clientes de la API, sin embeber Syncthing y sin trabajo
