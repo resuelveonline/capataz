@@ -143,6 +143,22 @@ class LinksController
         return response()->json(CloudLinkView::of(Lifecycle::refresh($this->find($request, $linkId))), 200, ['Cache-Control' => 'no-store']);
     }
 
+    /**
+     * DELETE /v1/links/{linkId}: revoca y borra los bytes. Idempotente: un
+     * enlace ya revocado, vencido o fallido responde 204 sin cambiar.
+     */
+    public function revoke(Request $request, string $linkId): \Illuminate\Http\Response
+    {
+        $link = Lifecycle::refresh($this->find($request, $linkId));
+        if (in_array($link->state, [Link::UPLOADING, Link::ACTIVE, Link::EXHAUSTED], true)) {
+            $link->state = Link::REVOKED;
+            Lifecycle::purge($link);
+            $link->save();
+        }
+
+        return response()->noContent(204, ['Cache-Control' => 'no-store']);
+    }
+
     /** Enlace de la instancia que firma; el de otra instancia es 404. */
     public static function findFor(Request $request, string $linkId): Link
     {

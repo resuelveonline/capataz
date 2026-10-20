@@ -14,6 +14,7 @@ Route::middleware('capataz.signed')->prefix('v1')->group(function () {
     Route::post('links', [LinksController::class, 'open']);
     Route::get('links', [LinksController::class, 'index']);
     Route::get('links/{linkId}', [LinksController::class, 'show']);
+    Route::delete('links/{linkId}', [LinksController::class, 'revoke']);
     Route::put('links/{linkId}/parts/{n}', [PartsController::class, 'put']);
     Route::post('links/{linkId}/complete', [CompleteController::class, 'complete']);
 });
