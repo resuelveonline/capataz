@@ -7,6 +7,7 @@ use App\Http\Controllers\CompleteController;
 use App\Http\Controllers\InstanceController;
 use App\Http\Controllers\LinksController;
 use App\Http\Controllers\PartsController;
+use App\Http\Controllers\PublicController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('capataz.signed')->prefix('v1')->group(function () {
@@ -18,3 +19,7 @@ Route::middleware('capataz.signed')->prefix('v1')->group(function () {
     Route::put('links/{linkId}/parts/{n}', [PartsController::class, 'put']);
     Route::post('links/{linkId}/complete', [CompleteController::class, 'complete']);
 });
+
+Route::get('s/{token}', [PublicController::class, 'page']);
+Route::get('s/{token}/meta', [PublicController::class, 'meta']);
+Route::get('s/{token}/blob', [PublicController::class, 'blob']);
