@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,9 @@ type Server struct {
 	// /v1/...; si devuelve un estado distinto de 0, se responde con ese
 	// estado y código sin tocar nada. Sirve para inyectar fallos.
 	Fail func(r *http.Request) (status int, code string)
+	// ExhaustedGrace: cuánto se sirven las continuaciones de un enlace
+	// agotado antes de borrar sus bytes (por defecto 1 h).
+	ExhaustedGrace time.Duration
 
 	nonces   map[string]time.Time
 	links    map[string]*link
@@ -69,6 +73,9 @@ type link struct {
 	parts     map[int][]byte
 	blob      []byte
 	downloads int
+	// exhaustedAt: cuándo se agotó el cupo; los bytes se conservan
+	// ExhaustedGrace para las continuaciones.
+	exhaustedAt *time.Time
 }
 
 // New arranca la nube falsa en un puerto libre de loopback.
@@ -82,14 +89,15 @@ func New(instanceID string, key []byte) *Server {
 // prueba de humo la necesita en un puerto fijo).
 func NewUnstarted(instanceID string, key []byte) *Server {
 	s := &Server{
-		InstanceID: instanceID,
-		Key:        bytes.Clone(key),
-		Limits:     DefaultLimits,
-		Now:        time.Now,
-		nonces:     map[string]time.Time{},
-		links:      map[string]*link{},
-		byToken:    map[string]string{},
-		requests:   map[string]int{},
+		InstanceID:     instanceID,
+		Key:            bytes.Clone(key),
+		Limits:         DefaultLimits,
+		Now:            time.Now,
+		ExhaustedGrace: time.Hour,
+		nonces:         map[string]time.Time{},
+		links:          map[string]*link{},
+		byToken:        map[string]string{},
+		requests:       map[string]int{},
 	}
 	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
 	return s
@@ -452,9 +460,19 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// public atiende /s/{token}/meta y /s/{token}/blob (sin firma).
+// public atiende /s/{token}/meta y /s/{token}/blob (sin firma), con las
+// reglas del contrato v0.1.1:
+//
+//   - token desconocido o enlace failed: 404 not_found;
+//   - uploading: 409 link_not_ready;
+//   - expired y revoked: 410; exhausted: 410 downloads_exhausted en /meta y
+//     en las peticiones que empiezan en el byte 0. Las continuaciones (Range
+//     que empieza después) se siguen sirviendo durante ExhaustedGrace;
+//   - /blob admite un solo intervalo (200 o 206); varios o mal formado: 416;
+//   - cuenta como descarga cada GET que empieza en el byte 0; HEAD devuelve
+//     lo mismo que GET pero sin cuerpo y nunca cuenta.
 func (s *Server) public(w http.ResponseWriter, r *http.Request, parts []string) {
-	if len(parts) != 2 || r.Method != http.MethodGet {
+	if len(parts) != 2 || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
 		writeErr(w, http.StatusNotFound, "not_found")
 		return
 	}
@@ -464,16 +482,28 @@ func (s *Server) public(w http.ResponseWriter, r *http.Request, parts []string) 
 		return
 	}
 	l := s.links[id]
-	if !s.gone(w, l) {
+	s.expire(l)
+	switch l.state {
+	case nube.StateFailed:
+		writeErr(w, http.StatusNotFound, "not_found")
 		return
-	}
-	if l.state != nube.StateActive {
+	case nube.StateUploading:
 		writeErr(w, http.StatusConflict, "link_not_ready")
+		return
+	case nube.StateExpired:
+		writeErr(w, http.StatusGone, "link_expired")
+		return
+	case nube.StateRevoked:
+		writeErr(w, http.StatusGone, "link_revoked")
 		return
 	}
 	switch parts[1] {
 	case "meta":
-		s.count("GET /s/{token}/meta")
+		s.count(r.Method + " /s/{token}/meta")
+		if l.state == nube.StateExhausted {
+			writeErr(w, http.StatusGone, "downloads_exhausted")
+			return
+		}
 		var remaining *int
 		if l.req.MaxDownloads != nil {
 			n := *l.req.MaxDownloads - l.downloads
@@ -483,24 +513,113 @@ func (s *Server) public(w http.ResponseWriter, r *http.Request, parts []string) 
 			"encryptedSize": l.req.EncryptedSize, "cipherVersion": "cpk1", "metaBlob": l.req.MetaBlob,
 			"downloadsRemaining": remaining})
 	case "blob":
-		s.count("GET /s/{token}/blob")
-		// Sin Range: cuenta como descarga (el contrato también cuenta
-		// bytes=0-...; la falsa no implementa Range).
-		if l.req.MaxDownloads != nil && l.downloads >= *l.req.MaxDownloads {
-			writeErr(w, http.StatusGone, "downloads_exhausted")
-			return
-		}
-		l.downloads++
-		if l.req.MaxDownloads != nil && l.downloads >= *l.req.MaxDownloads {
-			// Se sirve esta descarga; las siguientes ya no.
-			defer func() { l.state = nube.StateExhausted }()
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write(l.blob)
+		s.count(r.Method + " /s/{token}/blob")
+		s.blob(w, r, l)
 	default:
 		writeErr(w, http.StatusNotFound, "not_found")
 	}
+}
+
+func (s *Server) blob(w http.ResponseWriter, r *http.Request, l *link) {
+	if l.blob == nil { // agotado y fuera del margen: ya no hay bytes
+		writeErr(w, http.StatusGone, "downloads_exhausted")
+		return
+	}
+	size := int64(len(l.blob))
+	start, end, partial, ok := ParseRange(r.Header.Values("Range"), size)
+	if !ok {
+		w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
+		writeErr(w, http.StatusRequestedRangeNotSatisfiable, "invalid_request")
+		return
+	}
+	fromZero := start == 0
+	if l.state == nube.StateExhausted && fromZero {
+		writeErr(w, http.StatusGone, "downloads_exhausted")
+		return
+	}
+	if fromZero && r.Method == http.MethodGet {
+		l.downloads++
+		if l.req.MaxDownloads != nil && l.downloads >= *l.req.MaxDownloads {
+			// Se sirve esta descarga; las que empiecen en 0 ya no.
+			now := s.Now()
+			l.state, l.exhaustedAt = nube.StateExhausted, &now
+		}
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/octet-stream")
+	h.Set("Accept-Ranges", "bytes")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+	status := http.StatusOK
+	if partial {
+		status = http.StatusPartialContent
+		h.Set("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10)+"/"+strconv.FormatInt(size, 10))
+	}
+	w.WriteHeader(status)
+	if r.Method == http.MethodGet {
+		w.Write(l.blob[start : end+1])
+	}
+}
+
+// ParseRange interpreta el header Range de /s/{token}/blob para un paquete
+// de size bytes (size > 0). Sin header devuelve el paquete entero con
+// partial=false. Admite un solo intervalo "bytes=a-b", "bytes=a-" o
+// "bytes=-n"; b se recorta al último byte. Devuelve ok=false (416) si hay
+// varios intervalos o headers, otra unidad, sintaxis inválida, a > b,
+// a >= size o n = 0. La unidad no distingue mayúsculas (RFC 9110). Casos
+// en docs/vectores-range.json, que también prueba Laravel.
+func ParseRange(values []string, size int64) (start, end int64, partial, ok bool) {
+	if len(values) == 0 {
+		return 0, size - 1, false, true
+	}
+	if len(values) > 1 {
+		return 0, 0, false, false
+	}
+	v := strings.TrimSpace(values[0])
+	if len(v) < 6 || !strings.EqualFold(v[:6], "bytes=") || strings.Contains(v, ",") {
+		return 0, 0, false, false
+	}
+	spec := v[6:]
+	first, last, found := strings.Cut(strings.TrimSpace(spec), "-")
+	if !found || !digits(first) && first != "" || !digits(last) && last != "" || first == "" && last == "" {
+		return 0, 0, false, false
+	}
+	if first == "" { // sufijo: los últimos n bytes
+		n, err := strconv.ParseInt(last, 10, 64)
+		if errors.Is(err, strconv.ErrRange) {
+			n = size // más largo que cualquier paquete: el paquete entero
+		} else if err != nil || n == 0 {
+			return 0, 0, false, false
+		}
+		return max(size-n, 0), size - 1, true, true
+	}
+	a, err := strconv.ParseInt(first, 10, 64)
+	if err != nil || a >= size {
+		return 0, 0, false, false
+	}
+	b := size - 1
+	if last != "" {
+		v, err := strconv.ParseInt(last, 10, 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) || a > v && err == nil {
+			return 0, 0, false, false
+		}
+		if err == nil {
+			b = min(v, size-1)
+		}
+	}
+	return a, b, true, true
+}
+
+func digits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) find(w http.ResponseWriter, id string) *link {
@@ -529,9 +648,16 @@ func (s *Server) gone(w http.ResponseWriter, l *link) bool {
 }
 
 func (s *Server) expire(l *link) {
-	if (l.state == nube.StateUploading || l.state == nube.StateActive) && !s.Now().Before(l.req.ExpiresAt) {
-		l.state = nube.StateExpired
-		l.parts, l.blob = nil, nil
+	now := s.Now()
+	switch l.state {
+	case nube.StateUploading, nube.StateActive, nube.StateExhausted:
+		if !now.Before(l.req.ExpiresAt) {
+			l.state = nube.StateExpired
+			l.parts, l.blob = nil, nil
+		}
+	}
+	if l.state == nube.StateExhausted && l.blob != nil && !now.Before(l.exhaustedAt.Add(s.ExhaustedGrace)) {
+		l.blob = nil // ya solo responde 410
 	}
 }
 
