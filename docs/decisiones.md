@@ -164,18 +164,38 @@
   alternativa: un túnel que abra el propio host hacia afuera, p. ej.
   Cloudflare Tunnel).
 
+## 2026-10-19 (Fase 2b: contrato v0.2.3 de Capataz)
+- La 2b se hace primero en Go contra una Capataz Nube falsa (httptest) que
+  cumple api/capataz-nube-api.yaml; el servidor Laravel va en una fase
+  aparte.
+- Contrato v0.2.3: encryption=client por defecto; none queda reservado y se
+  rechaza con 400 invalid_request (la nube solo guarda CPK1). Link con
+  payloadSize, payloadSha256, packageSize y packageSha256 en lugar de
+  sizeBytes y sha256. exhausted de la nube se muestra como expired.
+  Código insufficient_storage. 304, 412 y 416 documentados en
+  /files/download y 405 en todas las rutas; 412 y 416 siguen con code
+  invalid_request.
+- Link.items y LinkRequest.items son objetos {folder, path}; hasta 100
+  elementos por enlace. Link.skipped cuenta los omitidos por motivo, sin
+  nombres.
+- POST /links solo valida de forma síncrona la petición, las carpetas y las
+  rutas (400, 404); lo demás llega en failureCode. Demasiadas preparaciones
+  a la vez: 429 rate_limited. Cuerpo mayor de 64 KiB: 413.
+- La clave K de cada enlace se guarda en el host, en un archivo 0600 dentro
+  de CAPATAZ_STATE_DIR, para que GET /links/{id} pueda devolver la url
+  completa tras la preparación asíncrona. Se borra al expirar, revocar o
+  fallar. Nunca va a Capataz Nube, a la bitácora ni a errores.
+- DELETE /links/{id}: preparing se cancela en local; uploading y active se
+  revocan en la nube primero (502 cloud_unreachable si no responde, sin
+  cambiar el estado); revoked, expired y failed responden 204.
+- /s/{token} sale de este contrato: lo describe solo el de Capataz Nube.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo;
   alternativa: un túnel saliente que abra el propio host, p. ej. Cloudflare Tunnel).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
-- Contrato v0.2.3 de Capataz: 304, 405 y 412 documentados (hoy 405 y 412 salen
-  como invalid_request; 304 lo genera ServeContent con If-Modified-Since);
-  encryption=client por defecto en LinkRequest; el estado exhausted de la
-  nube se muestra como expired en Link.status; Link con payloadSha256,
-  payloadSize, packageSha256 y packageSize (en lugar de sha256 y sizeBytes,
-  ambiguos); código insufficient_storage para disco lleno en el staging.
 - Medir el rendimiento en la Raspberry Pi, anotando el modelo de Pi y el tipo
   de disco (SSD por USB, tarjeta SD...) de cada medición:
   - descargas: el ResponseWriter envuelto (bitácora y plazo por inactividad)

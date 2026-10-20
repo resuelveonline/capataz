@@ -47,10 +47,10 @@ archivos, y generar enlaces temporales de solo lectura.
 - Al expirar o revocar: se borra la copia y se invalida el token. Revocar
   requiere conexión con Capataz Nube; vencer no.
 - Cifrado: CPK1, cifrado de extremo a extremo (formato en
-  [docs/formato-paquete-cifrado.md](docs/formato-paquete-cifrado.md)). Por
-  decisión tomada será obligatorio por defecto (encryption=client) cuando
-  salga el contrato v0.2.3; hoy el contrato v0.2.2 aún dice none. Clave por
-  enlace en el fragmento # de la URL, nunca guardada en el servidor.
+  [docs/formato-paquete-cifrado.md](docs/formato-paquete-cifrado.md)).
+  Obligatorio desde el contrato v0.2.3: encryption=client por defecto y none
+  se rechaza. Clave por enlace en el fragmento # de la URL, nunca en Capataz
+  Nube; el host la guarda (0600, en el estado) solo mientras el enlace vive.
 - Tope por enlace: 500 MiB de contenido (524 288 000 bytes; 524 296 032 de
   paquete).
 - Antes de copiar: db/scan con sub=, validar con db/file y db/need que el
@@ -119,5 +119,7 @@ archivos, y generar enlaces temporales de solo lectura.
   /folders, /files, /files/download) con token de desarrollo por .env.
 - Fase 2a (rama fase-2a-paquete, implementada): copia congelada, ZIP y
   cifrado CPK1 en local con `capataz prepare`; sin red ni Capataz Nube.
-- Después: subida a Capataz Nube y POST /links (2b), emparejamiento de
-  dispositivos.
+- Fase 2b (rama fase-2b-enlaces, en curso): contrato v0.2.3, cliente de
+  Capataz Nube (HMAC, subida por partes) y POST/GET/DELETE /links, probados
+  contra una Capataz Nube falsa; el servidor Laravel va en una fase aparte.
+- Después: Capataz Nube en Laravel, emparejamiento de dispositivos.
