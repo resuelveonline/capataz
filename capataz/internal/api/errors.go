@@ -3,10 +3,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/resuelveonline/capataz/capataz/internal/auth"
+	"github.com/resuelveonline/capataz/capataz/internal/links"
 	"github.com/resuelveonline/capataz/capataz/internal/safepath"
+	"github.com/resuelveonline/capataz/capataz/internal/stage"
 	"github.com/resuelveonline/capataz/capataz/internal/syncthing"
 )
 
@@ -19,7 +22,23 @@ const (
 	codePathNotAllowed       = "path_not_allowed"
 	codeSyncthingUnavailable = "syncthing_unavailable"
 	codeInternal             = "internal_error"
+	codeForbidden            = "forbidden"
+	codeRateLimited          = "rate_limited"
+	codePayloadTooLarge      = "payload_too_large"
+	codeCloudUnreachable     = "cloud_unreachable"
 )
+
+// statusOf da el estado HTTP de un código de links o stage que llega como
+// respuesta (no como failureCode).
+var statusOf = map[string]int{
+	codeInvalidRequest:       http.StatusBadRequest,
+	codePathNotAllowed:       http.StatusBadRequest,
+	codeNotFound:             http.StatusNotFound,
+	codeRateLimited:          http.StatusTooManyRequests,
+	codePayloadTooLarge:      http.StatusRequestEntityTooLarge,
+	codeCloudUnreachable:     http.StatusBadGateway,
+	codeSyncthingUnavailable: http.StatusBadGateway,
+}
 
 // errorBody es el esquema Error del contrato.
 type errorBody struct {
@@ -48,9 +67,19 @@ var errNotFound = errors.New("no existe")
 // fail traduce un error de dominio a la respuesta HTTP del contrato.
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var re *requestError
+	var le *links.Error
+	var se *stage.Error
 	switch {
 	case errors.As(err, &re):
 		writeError(w, re.status, re.code, re.message)
+	case errors.As(err, &le):
+		s.coded(w, r, le.Code, le.Message, err)
+	case errors.As(err, &se):
+		msg := se.Reason
+		if se.Item > 0 {
+			msg = fmt.Sprintf("elemento %d: %s", se.Item, se.Reason)
+		}
+		s.coded(w, r, se.Code, msg, err)
 	case errors.Is(err, auth.ErrUnauthorized):
 		w.Header().Set("WWW-Authenticate", "Bearer")
 		writeError(w, http.StatusUnauthorized, codeUnauthorized, "token ausente o inválido")
@@ -70,6 +99,24 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.log.Error("error interno", "requestId", requestID(r), "error", err)
 		writeError(w, http.StatusInternalServerError, codeInternal, "error interno")
 	}
+}
+
+// coded responde un error con código de dominio. Los mensajes de links y
+// stage nunca llevan rutas; un código sin estado conocido es interno.
+func (s *Server) coded(w http.ResponseWriter, r *http.Request, code, msg string, err error) {
+	status, ok := statusOf[code]
+	if !ok {
+		s.log.Error("error interno", "requestId", requestID(r), "error", err)
+		writeError(w, http.StatusInternalServerError, codeInternal, "error interno")
+		return
+	}
+	if status >= 500 {
+		s.log.Warn("servicio externo no disponible", "requestId", requestID(r), "code", code, "error", err)
+	}
+	if code == codeRateLimited {
+		w.Header().Set("Retry-After", "30")
+	}
+	writeError(w, status, code, msg)
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {

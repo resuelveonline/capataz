@@ -315,8 +315,9 @@ func TestCreateRejects(t *testing.T) {
 		code string
 	}{
 		{"sin elementos", func(r *Request) { r.Items = nil }, CodeInvalidRequest},
-		{"ttl corto", func(r *Request) { r.TTL = 59 * time.Minute }, CodeInvalidRequest},
-		{"ttl largo", func(r *Request) { r.TTL = 31 * 24 * time.Hour }, CodeInvalidRequest},
+		{"ttl corto", func(r *Request) { r.TTLSeconds = ptr(int64(3599)) }, CodeInvalidRequest},
+		{"ttl largo", func(r *Request) { r.TTLSeconds = ptr(int64(2592001)) }, CodeInvalidRequest},
+		{"ttl cero", func(r *Request) { r.TTLSeconds = ptr(int64(0)) }, CodeInvalidRequest},
 		{"encryption none", func(r *Request) { r.Encryption = "none" }, CodeInvalidRequest},
 		{"maxDownloads 0", func(r *Request) { r.MaxDownloads = &zero }, CodeInvalidRequest},
 		{"label largo", func(r *Request) { r.Label = strings.Repeat("ñ", 121) }, CodeInvalidRequest},
@@ -600,3 +601,5 @@ func TestStorePermissions(t *testing.T) {
 		t.Error("aceptó un directorio de enlaces 0755")
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

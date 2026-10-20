@@ -86,7 +86,7 @@ type Item struct {
 // Request es LinkRequest ya decodificado.
 type Request struct {
 	Items        []Item
-	TTL          time.Duration // 0 = DefaultTTL
+	TTLSeconds   *int64 // nil = DefaultTTL
 	MaxDownloads *int
 	Label        string
 	Encryption   string // "" o "client"
@@ -279,11 +279,11 @@ func (m *Manager) Create(ctx context.Context, owner string, req Request) (Link, 
 		Link: Link{
 			ID: prepare.NewLinkID(), Status: StatusPreparing, CreatedAt: now,
 			// Provisional: la vigencia definitiva empieza al abrir la subida.
-			ExpiresAt:    now.Add(req.TTL),
+			ExpiresAt:    now.Add(time.Duration(*req.TTLSeconds) * time.Second),
 			MaxDownloads: req.MaxDownloads, Items: req.Items, Encryption: "client",
 		},
 		Owner: owner,
-		TTL:   int64(req.TTL / time.Second),
+		TTL:   *req.TTLSeconds,
 	}
 	if req.Label != "" {
 		r.Label = &req.Label
@@ -311,10 +311,11 @@ func validate(req *Request) error {
 	case !utf8.ValidString(req.Label) || utf8.RuneCountInString(req.Label) > MaxLabelRunes:
 		return newError(CodeInvalidRequest, "label demasiado largo o inválido")
 	}
-	if req.TTL == 0 {
-		req.TTL = DefaultTTL
+	if req.TTLSeconds == nil {
+		d := int64(DefaultTTL / time.Second)
+		req.TTLSeconds = &d
 	}
-	if req.TTL < MinTTL || req.TTL > MaxTTL || req.TTL%time.Second != 0 {
+	if ttl := *req.TTLSeconds; ttl < int64(MinTTL/time.Second) || ttl > int64(MaxTTL/time.Second) {
 		return newError(CodeInvalidRequest, "ttlSeconds fuera de rango")
 	}
 	seen := map[Item]bool{}

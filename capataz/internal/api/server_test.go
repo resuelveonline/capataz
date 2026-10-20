@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/resuelveonline/capataz/capataz/internal/auth"
+	"github.com/resuelveonline/capataz/capataz/internal/links"
+	"github.com/resuelveonline/capataz/capataz/internal/stage"
 	"github.com/resuelveonline/capataz/capataz/internal/syncthing"
 )
 
@@ -207,7 +209,9 @@ func TestErrorCodesInContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, code := range []string{codeUnauthorized, codeNotFound, codeInvalidRequest,
-		codePathNotAllowed, codeSyncthingUnavailable, codeInternal} {
+		codePathNotAllowed, codeSyncthingUnavailable, codeInternal, codeForbidden, codeRateLimited,
+		codePayloadTooLarge, codeCloudUnreachable, links.CodeCloudQuota, stage.CodeFileNotSynced,
+		stage.CodeFileInUse, stage.CodeFileChanged, stage.CodeInsufficientStorage} {
 		if !bytes.Contains(spec, []byte("            - "+code+"\n")) {
 			t.Errorf("el código %q no está en Error.code del contrato", code)
 		}
