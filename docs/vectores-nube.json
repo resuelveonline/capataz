@@ -1,0 +1,81 @@
+{
+  "description": "Vectores de Capataz Nube (api/capataz-nube-api.yaml). tokenHash = base64url sin relleno de SHA-256 del texto de 43 caracteres del token, tal como viaja en la URL. Firma = base64url sin relleno de HMAC-SHA256(clave de instancia, cadena canónica); la cadena canónica son cinco líneas separadas por \\n sin salto final: método, destino (ruta y consulta tal como viajan), timestamp, nonce y SHA-256 hex del cuerpo. Claves y tokens de ejemplo, no reales.",
+  "tokenHash": [
+    {
+      "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "tokenHash": "DwBzhbb51LfusnSGBa_hqYSgo7-j8BTQnip4TOnlzRo"
+    },
+    {
+      "token": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "tokenHash": "6oZqdX5MOLq_qBJ8vppAnT4fk6AP8UiP9zX8-Rev_9A"
+    },
+    {
+      "token": "__________________________________________8",
+      "tokenHash": "Il9-dTKd1FqjVJddc5hzGTCTk686TGczvBNgGk8bh5Y"
+    }
+  ],
+  "signature": {
+    "instanceId": "vectoresnube0000000000000a",
+    "instanceKeyBase64url": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+    "instanceKeyHex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+    "cases": [
+      {
+        "name": "GET con consulta y sin cuerpo",
+        "method": "GET",
+        "target": "/v1/links?state=active&limit=2",
+        "timestamp": "1760000000",
+        "nonce": "AAECAwQFBgcICQoLDA0ODw",
+        "bodyEncoding": "empty",
+        "body": "",
+        "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "canonical": "GET\n/v1/links?state=active&limit=2\n1760000000\nAAECAwQFBgcICQoLDA0ODw\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "signature": "QKrGdCwsv5OruFug1RWss9aKm_Iui-TqpjGD9gXbDEY",
+        "headers": {
+          "X-Capataz-Content-SHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "X-Capataz-Instance": "vectoresnube0000000000000a",
+          "X-Capataz-Nonce": "AAECAwQFBgcICQoLDA0ODw",
+          "X-Capataz-Signature": "QKrGdCwsv5OruFug1RWss9aKm_Iui-TqpjGD9gXbDEY",
+          "X-Capataz-Timestamp": "1760000000"
+        }
+      },
+      {
+        "name": "POST con cuerpo JSON",
+        "method": "POST",
+        "target": "/v1/links",
+        "timestamp": "1760000060",
+        "nonce": "EBESExQVFhcYGRobHB0eHw",
+        "bodyEncoding": "utf8",
+        "body": "{\"linkId\":\"enlaceDeEjemplo0001\",\"tokenHash\":\"6oZqdX5MOLq_qBJ8vppAnT4fk6AP8UiP9zX8-Rev_9A\",\"expiresAt\":\"2025-10-10T09:00:00Z\",\"maxDownloads\":null,\"cipherVersion\":\"cpk1\",\"encryptedSize\":1048624,\"partSize\":8388608,\"metaBlob\":\"AAECAwQFBgcICQoL\"}",
+        "contentSha256": "b9a2382a3db12eefe1fc5eabbfd78c16281400dbbf1ac3b1c709895d734fa206",
+        "canonical": "POST\n/v1/links\n1760000060\nEBESExQVFhcYGRobHB0eHw\nb9a2382a3db12eefe1fc5eabbfd78c16281400dbbf1ac3b1c709895d734fa206",
+        "signature": "uqr5UjNIdoTew_Ec24ISOedX8iaet7LmKF0ik4OKWkg",
+        "headers": {
+          "X-Capataz-Content-SHA256": "b9a2382a3db12eefe1fc5eabbfd78c16281400dbbf1ac3b1c709895d734fa206",
+          "X-Capataz-Instance": "vectoresnube0000000000000a",
+          "X-Capataz-Nonce": "EBESExQVFhcYGRobHB0eHw",
+          "X-Capataz-Signature": "uqr5UjNIdoTew_Ec24ISOedX8iaet7LmKF0ik4OKWkg",
+          "X-Capataz-Timestamp": "1760000060"
+        }
+      },
+      {
+        "name": "PUT de una parte binaria pequeña",
+        "method": "PUT",
+        "target": "/v1/links/enlaceDeEjemplo0001/parts/1",
+        "timestamp": "1760000120",
+        "nonce": "ICEiIyQlJicoKSorLC0uLw",
+        "bodyEncoding": "hex",
+        "body": "43504b31000102030405060708090a0b0c0d0e0f101112131415161718191a1b",
+        "contentSha256": "1f9d398cefd0d3923383bae6e9d1821eec1a43266edef3f80e23c64b18581337",
+        "canonical": "PUT\n/v1/links/enlaceDeEjemplo0001/parts/1\n1760000120\nICEiIyQlJicoKSorLC0uLw\n1f9d398cefd0d3923383bae6e9d1821eec1a43266edef3f80e23c64b18581337",
+        "signature": "KW1Q9LuWQMY047oCDZX-fsPxJK8YUZ98EjRzNKcYHfE",
+        "headers": {
+          "X-Capataz-Content-SHA256": "1f9d398cefd0d3923383bae6e9d1821eec1a43266edef3f80e23c64b18581337",
+          "X-Capataz-Instance": "vectoresnube0000000000000a",
+          "X-Capataz-Nonce": "ICEiIyQlJicoKSorLC0uLw",
+          "X-Capataz-Signature": "KW1Q9LuWQMY047oCDZX-fsPxJK8YUZ98EjRzNKcYHfE",
+          "X-Capataz-Timestamp": "1760000120"
+        }
+      }
+    ]
+  }
+}

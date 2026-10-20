@@ -12,6 +12,9 @@ import (
 const (
 	secretKey   = "clave-secreta-de-syncthing"
 	secretToken = "token-de-desarrollo-muy-largo-0123456789"
+	// 32 bytes en base64url y 16 bytes (inválida).
+	secretNube      = "Y2xhdmUtZGUtbnViZS1wYXJhLXBydWViYXMtMDEyMzQ"
+	secretNubeShort = "Y2xhdmUtZGUtbnViZS0xMg"
 )
 
 func envOf(m map[string]string) func(string) string {
@@ -80,6 +83,10 @@ func TestFromEnvErrors(t *testing.T) {
 			[]string{"CAPATAZ_DEV_TOKEN debe tener al menos 32"}},
 		{"url sin esquema", func(m map[string]string) { m["SYNCTHING_URL"] = "127.0.0.1:8384" },
 			[]string{"SYNCTHING_URL debe ser"}},
+		{"nube sin https", func(m map[string]string) { m["CAPATAZ_NUBE_URL"] = "http://sync.softmx.net" },
+			[]string{"CAPATAZ_NUBE_URL debe ser"}},
+		{"clave de nube corta", func(m map[string]string) { m["CAPATAZ_NUBE_KEY"] = secretNubeShort },
+			[]string{"CAPATAZ_NUBE_KEY debe ser"}},
 		{"url con credenciales", func(m map[string]string) { m["SYNCTHING_URL"] = "http://admin:" + secretKey + "@127.0.0.1:8384" },
 			[]string{"SYNCTHING_URL debe ser"}},
 	}
@@ -98,7 +105,7 @@ func TestFromEnvErrors(t *testing.T) {
 				}
 			}
 			// El mensaje nunca debe contener valores secretos.
-			for _, s := range []string{secretKey, secretToken, "corto-pero-secreto"} {
+			for _, s := range []string{secretKey, secretToken, "corto-pero-secreto", secretNubeShort} {
 				if strings.Contains(msg, s) {
 					t.Errorf("el mensaje filtra un secreto: %q", msg)
 				}
@@ -107,14 +114,30 @@ func TestFromEnvErrors(t *testing.T) {
 	}
 }
 
-func TestLogValueRedactsSecrets(t *testing.T) {
+func TestNube(t *testing.T) {
 	c, err := FromEnv(envOf(validEnv()))
+	if err != nil || c.NubeURL != "https://sync.softmx.net" || c.NubeKey != nil {
+		t.Fatalf("por defecto: %q %v %v", c.NubeURL, c.NubeKey != nil, err)
+	}
+	env := validEnv()
+	env["CAPATAZ_NUBE_URL"] = "http://127.0.0.1:18090/"
+	env["CAPATAZ_NUBE_KEY"] = secretNube
+	c, err = FromEnv(envOf(env))
+	if err != nil || c.NubeURL != "http://127.0.0.1:18090" || len(c.NubeKey) != 32 {
+		t.Fatalf("con nube local: %q %d %v", c.NubeURL, len(c.NubeKey), err)
+	}
+}
+
+func TestLogValueRedactsSecrets(t *testing.T) {
+	env := validEnv()
+	env["CAPATAZ_NUBE_KEY"] = secretNube
+	c, err := FromEnv(envOf(env))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
 	slog.New(slog.NewTextHandler(&buf, nil)).Info("config", "cfg", c)
-	if out := buf.String(); strings.Contains(out, secretKey) || strings.Contains(out, secretToken) {
+	if out := buf.String(); strings.Contains(out, secretKey) || strings.Contains(out, secretToken) || strings.Contains(out, secretNube) {
 		t.Errorf("el log filtra secretos: %s", out)
 	}
 }

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Capataz API
-  version: 0.2.2
+  version: 0.2.3
   license:
     name: Propietaria
   description: >
@@ -12,6 +12,10 @@ info:
     descarga pública y decide el vencimiento.
     Las operaciones marcadas con x-roles [titular] las rechaza el servidor con
     403 si el token no pertenece a la cuenta titular.
+    Respuestas comunes a todas las rutas: 405 (método no permitido, con
+    header Allow) e invalid_request en el cuerpo. La descarga pública
+    (/s/{token}, /s/{token}/meta y /s/{token}/blob) no es de esta API: la
+    sirve Capataz Nube y está en api/capataz-nube-api.yaml.
 
 servers:
   - url: http://localhost:8080
@@ -291,6 +295,9 @@ paths:
         - { $ref: "#/components/parameters/FolderQ" }
         - { $ref: "#/components/parameters/PathQ" }
         - { name: Range, in: header, required: false, schema: { type: string, example: "bytes=0-1048575" } }
+        - { name: If-Modified-Since, in: header, required: false, schema: { type: string } }
+        - { name: If-Unmodified-Since, in: header, required: false, schema: { type: string } }
+        - { name: If-Range, in: header, required: false, schema: { type: string } }
       responses:
         "200":
           description: Contenido completo
@@ -298,10 +305,20 @@ paths:
             application/octet-stream:
               schema: { type: string, format: binary }
         "206": { description: Contenido parcial }
+        "304": { description: Sin cambios desde If-Modified-Since (sin cuerpo) }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
-        "416": { $ref: "#/components/responses/Error" }
+        "412":
+          description: If-Unmodified-Since no se cumple (code invalid_request)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "416":
+          description: Rango no satisfacible (code invalid_request, header Content-Range bytes */N)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
 
@@ -312,10 +329,17 @@ paths:
       summary: Crea un enlace temporal de solo lectura (asíncrono)
       description: >
         Capataz prepara una copia congelada de los elementos (escaneo, verificación
-        de estado, copia a staging, verificación posterior), la sube a Capataz Nube
-        y publica el enlace. Responde de inmediato con el enlace en estado
-        `preparing`; el cliente consulta GET /links/{id} hasta que esté `active`
-        o `failed`. La copia no sigue cambios posteriores de Syncthing.
+        de estado, copia a staging, verificación posterior), la cifra con CPK1, la
+        sube a Capataz Nube y publica el enlace. Responde de inmediato con el
+        enlace en estado `preparing`; el cliente consulta GET /links/{id} hasta
+        que esté `active` (con `url`) o `failed` (con `failureCode`). La copia no
+        sigue cambios posteriores de Syncthing.
+
+        Antes del 202 solo se valida la petición: forma del JSON, vigencia,
+        número de elementos, que cada carpeta la reporte Syncthing y que cada
+        ruta sea admisible (sin ../ ni enlaces simbólicos). Lo demás (que esté
+        indexado y sincronizado, el tope de 500 MiB, el espacio en disco, que no
+        cambie durante la copia, la subida) se informa después en `failureCode`.
       x-roles: [titular]
       requestBody:
         required: true
@@ -328,11 +352,30 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Link" }
-        "400": { $ref: "#/components/responses/Error" }
+        "400":
+          description: >
+            invalid_request (JSON, vigencia, elementos repetidos o encryption=none)
+            o path_not_allowed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
-        "413": { $ref: "#/components/responses/Error" }
+        "404":
+          description: not_found (carpeta o ruta inexistente)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: payload_too_large (cuerpo de la petición mayor de 64 KiB)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: rate_limited (ya hay demasiados enlaces en preparación o subida)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "500": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
     get:
@@ -379,6 +422,12 @@ paths:
       operationId: revokeLink
       tags: [Enlaces]
       summary: Revoca un enlace y borra su copia (requiere conexión con Capataz Nube)
+      description: >
+        Un enlace en `preparing` se cancela y queda `revoked` sin hablar con la
+        nube. Uno en `uploading` o `active` se revoca primero en Capataz Nube; si
+        no se puede, responde 502 cloud_unreachable y el enlace sigue como
+        estaba. Es idempotente: un enlace ya `revoked`, `expired` o `failed`
+        responde 204.
       x-roles: [titular]
       parameters:
         - { $ref: "#/components/parameters/Id" }
@@ -389,32 +438,6 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
-
-  /s/{token}:
-    get:
-      operationId: downloadSharedLink
-      tags: [Enlaces]
-      summary: Descarga pública (sin sesión). La sirve Capataz Nube
-      description: >
-        Un archivo, o un ZIP si el enlace tiene varios elementos. Si el enlace
-        es de modo `client`, el contenido descargado está cifrado y el navegador
-        lo descifra con la clave del fragmento (#) de la URL, que nunca se envía
-        al servidor. Se documenta aquí por completitud; en producción este
-        endpoint vive en Capataz Nube.
-      security: []
-      parameters:
-        - { name: token, in: path, required: true, schema: { type: string } }
-        - { name: Range, in: header, required: false, schema: { type: string } }
-      responses:
-        "200":
-          description: Contenido
-          content:
-            application/octet-stream:
-              schema: { type: string, format: binary }
-        "206": { description: Contenido parcial }
-        "404": { description: "No existe, expiró, fue revocado o alcanzó su límite de descargas" }
-        "416": { $ref: "#/components/responses/Error" }
-        "500": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:
@@ -457,7 +480,11 @@ components:
             Código estable para que portal y apps lo traduzcan igual.
             syncthing_unavailable (502) indica que Capataz no pudo hablar con
             Syncthing; internal_error (500) es un fallo interno cuyo detalle
-            solo queda en la bitácora del servidor.
+            solo queda en la bitácora del servidor. insufficient_storage indica
+            que el staging del host no tiene espacio para la copia congelada.
+            Los códigos de enlace (file_*, payload_too_large,
+            insufficient_storage, cloud_*) suelen llegar en Link.failureCode y
+            no como respuesta HTTP.
           enum:
             - unauthorized
             - forbidden
@@ -469,6 +496,7 @@ components:
             - file_changed_during_copy
             - already_exists
             - payload_too_large
+            - insufficient_storage
             - rate_limited
             - link_expired
             - link_revoked
@@ -535,45 +563,96 @@ components:
         items:
           type: array
           minItems: 1
-          items:
-            type: object
-            required: [folder, path]
-            properties:
-              folder: { type: string }
-              path:   { type: string }
+          maxItems: 100
+          items: { $ref: "#/components/schemas/LinkItem" }
         ttlSeconds:
           type: integer
           minimum: 3600
           maximum: 2592000
           default: 86400
           description: Vigencia en segundos (mínimo 1 hora, máximo 30 días, por defecto 24 horas)
-        maxDownloads: { type: integer, minimum: 1, nullable: true }
-        label:        { type: string, maxLength: 120 }
+        maxDownloads: { type: integer, minimum: 1, nullable: true, description: "null o ausente: sin tope" }
+        label:
+          type: string
+          maxLength: 120
+          description: Nombre visible para el titular y base del nombre del ZIP con varios elementos
         encryption:
           type: string
           enum: [none, client]
-          default: none
+          default: client
+          description: >
+            client: paquete CPK1 cifrado de extremo a extremo; la clave va solo
+            en el fragmento # de la URL. none está reservado y en esta versión se
+            rechaza con 400 invalid_request (Capataz Nube solo guarda CPK1).
+
+    LinkItem:
+      type: object
+      required: [folder, path]
+      properties:
+        folder: { type: string, description: Id de carpeta de Syncthing }
+        path:   { type: string, description: Ruta relativa a la carpeta (archivo o carpeta) }
 
     Link:
       type: object
+      required: [id, status, progress, createdAt, expiresAt, downloads, items, encryption]
       properties:
         id:           { type: string }
         url:
           type: string
           nullable: true
-          description: Disponible cuando status=active
+          description: >
+            https://sync.softmx.net/s/<token>#<clave>. Solo con status=active;
+            null en los demás estados. La clave del fragmento la guarda el host
+            (archivo 0600 en CAPATAZ_STATE_DIR) mientras el enlace está vigente y
+            se borra al expirar, revocar o fallar; Capataz Nube nunca la recibe.
         label:        { type: string, nullable: true }
-        status:       { $ref: "#/components/schemas/LinkStatus" }
-        progress:     { type: number, minimum: 0, maximum: 1 }
+        status:
+          allOf:
+            - $ref: "#/components/schemas/LinkStatus"
+          description: >
+            El estado exhausted de Capataz Nube (cupo de descargas agotado) se
+            muestra como expired.
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fracción del paquete ya subida (0 en preparing, 1 en active)
         failureCode:
           type: string
           nullable: true
-          description: Código de Error cuando status=failed
+          description: Un código del enum de Error; solo con status=failed
         createdAt:    { type: string, format: date-time }
         expiresAt:    { type: string, format: date-time }
         downloads:    { type: integer }
         maxDownloads: { type: integer, nullable: true }
-        items:        { type: array, items: { type: string } }
-        sizeBytes:    { type: integer, format: int64, nullable: true }
-        sha256:       { type: string, nullable: true }
+        items:        { type: array, items: { $ref: "#/components/schemas/LinkItem" } }
+        payloadSize:
+          type: integer
+          format: int64
+          nullable: true
+          description: Bytes de la carga útil en claro (el archivo o el ZIP); null hasta prepararla
+        payloadSha256:
+          type: string
+          nullable: true
+          description: SHA-256 en hexadecimal de la carga útil en claro
+        packageSize:
+          type: integer
+          format: int64
+          nullable: true
+          description: Bytes del paquete CPK1 que se sube a Capataz Nube
+        packageSha256:
+          type: string
+          nullable: true
+          description: SHA-256 en hexadecimal del paquete CPK1
+        skipped:
+          type: object
+          nullable: true
+          description: >
+            Elementos omitidos dentro de carpetas seleccionadas, por motivo y sin
+            nombres. El cliente los muestra como aviso.
+          properties:
+            ignored: { type: integer, description: Ignorados por .stignore }
+            hidden:  { type: integer }
+            symlink: { type: integer }
+            special: { type: integer }
         encryption:   { type: string, enum: [none, client] }

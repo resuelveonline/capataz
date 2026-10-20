@@ -23,6 +23,8 @@ import (
 	"github.com/resuelveonline/capataz/capataz/internal/auth"
 	"github.com/resuelveonline/capataz/capataz/internal/config"
 	"github.com/resuelveonline/capataz/capataz/internal/cpk"
+	"github.com/resuelveonline/capataz/capataz/internal/links"
+	"github.com/resuelveonline/capataz/capataz/internal/nube"
 	"github.com/resuelveonline/capataz/capataz/internal/prepare"
 	"github.com/resuelveonline/capataz/capataz/internal/stage"
 	"github.com/resuelveonline/capataz/capataz/internal/state"
@@ -80,6 +82,26 @@ func runServe(log *slog.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
+	stager, err := stage.New(stage.Options{
+		Syncthing: st, StagingDir: cfg.StagingDir, MaxPayload: cpk.MaxPayload, Logger: log,
+	})
+	if err != nil {
+		return err
+	}
+	var cloud *nube.Client
+	if cfg.NubeKey != nil {
+		if cloud, err = nube.New(cfg.NubeURL, inst.InstanceID, cfg.NubeKey); err != nil {
+			return err
+		}
+	} else {
+		log.Warn("CAPATAZ_NUBE_KEY vacía: los enlaces temporales están desactivados")
+	}
+	mgr, err := links.Open(links.Options{
+		StateDir: cfg.StateDir, StagingDir: cfg.StagingDir, Stager: stager, Nube: cloud, Logger: log,
+	})
+	if err != nil {
+		return fmt.Errorf("enlaces: %w", err)
+	}
 
 	handler := api.New(api.Options{
 		Auth:      auth.NewDevToken(cfg.DevToken),
@@ -90,6 +112,7 @@ func runServe(log *slog.Logger, args []string) error {
 			Version:    version,
 			PublicMode: "local",
 		},
+		Links:  mgr,
 		Logger: log,
 	})
 
@@ -119,6 +142,17 @@ func runServe(log *slog.Logger, args []string) error {
 		log.Info("Syncthing conectado", "carpetas", len(folders))
 	}
 	cancel()
+	if cloud != nil {
+		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if ci, err := cloud.Instance(checkCtx); err != nil {
+			log.Warn("Capataz Nube no responde todavía", "error", err)
+		} else {
+			log.Info("Capataz Nube conectada", "enlacesActivos", ci.Usage.ActiveLinks)
+		}
+		cancel()
+	}
+	mgr.Start()
+	defer mgr.Close() // tras Shutdown: una subida cortada se reanuda al arrancar
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()

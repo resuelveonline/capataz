@@ -164,18 +164,94 @@
   alternativa: un túnel que abra el propio host hacia afuera, p. ej.
   Cloudflare Tunnel).
 
+## 2026-10-19 (Fase 2b: contrato v0.2.3 de Capataz)
+- La 2b se hace primero en Go contra una Capataz Nube falsa (httptest) que
+  cumple api/capataz-nube-api.yaml; el servidor Laravel va en una fase
+  aparte.
+- Contrato v0.2.3: encryption=client por defecto; none queda reservado y se
+  rechaza con 400 invalid_request (la nube solo guarda CPK1). Link con
+  payloadSize, payloadSha256, packageSize y packageSha256 en lugar de
+  sizeBytes y sha256. exhausted de la nube se muestra como expired.
+  Código insufficient_storage. 304, 412 y 416 documentados en
+  /files/download y 405 en todas las rutas; 412 y 416 siguen con code
+  invalid_request.
+- Link.items y LinkRequest.items son objetos {folder, path}; hasta 100
+  elementos por enlace. Link.skipped cuenta los omitidos por motivo, sin
+  nombres.
+- POST /links solo valida de forma síncrona la petición, las carpetas y las
+  rutas (400, 404); lo demás llega en failureCode. Demasiadas preparaciones
+  a la vez: 429 rate_limited. Cuerpo mayor de 64 KiB: 413.
+- La clave K de cada enlace se guarda en el host, en un archivo 0600 dentro
+  de CAPATAZ_STATE_DIR, para que GET /links/{id} pueda devolver la url
+  completa tras la preparación asíncrona. Se borra al expirar, revocar o
+  fallar. Nunca va a Capataz Nube, a la bitácora ni a errores.
+- DELETE /links/{id}: preparing se cancela en local; uploading y active se
+  revocan en la nube primero (502 cloud_unreachable si no responde, sin
+  cambiar el estado); revoked, expired y failed responden 204.
+- /s/{token} sale de este contrato: lo describe solo el de Capataz Nube.
+
+## 2026-10-19 (Fase 2b: enlaces contra Capataz Nube)
+- tokenHash = base64url(SHA-256) de los 43 caracteres del token tal como
+  van en la URL (no de los 32 bytes): es lo que la nube recibe en
+  /s/{token} y puede hashear sin decodificar. Lo debe hacer igual el
+  Laravel.
+- expiresAt definitivo = hora de abrir la subida + ttlSeconds (lo que pide
+  el contrato de la nube); mientras está en preparing, Link.expiresAt es
+  provisional (createdAt + ttlSeconds).
+- CAPATAZ_NUBE_KEY: 32 bytes en base64url (se acepta también base64 con
+  relleno). Sin ella Capataz arranca y /links responde cloud_unreachable.
+  CAPATAZ_NUBE_URL exige https salvo en loopback.
+- Reloj: si la nube responde timestamp_out_of_window, Capataz toma su
+  serverTime como desfase y reintenta una vez con nonce nuevo.
+- Reintentos: errores de red, 5xx y 429 (respetando Retry-After), con
+  espera exponencial; hasta 8 intentos por petición (unos 5 min). Después,
+  failed con cloud_unreachable y se libera la subida en la nube.
+- Estado por enlace en CAPATAZ_STATE_DIR/links/<id>.json (0600, directorio
+  0700, escritura atómica). Guarda el cuerpo exacto de la apertura para
+  reabrirla igual tras un reinicio (la nube es idempotente por linkId) y
+  subir solo las partes que faltan. Una preparación cortada queda failed
+  con internal_error: su clave solo estaba en memoria.
+- El paquete vive en CAPATAZ_STAGING_DIR/link-<id>/ hasta que la nube
+  activa el enlace; los link-* sin una subida pendiente se borran al
+  arrancar.
+- Como máximo 2 enlaces en preparing o uploading a la vez (429
+  rate_limited con Retry-After: 30).
+- Vencimiento local cada 30 s, sin la nube. Conciliación cada 5 min con
+  GET /v1/links: descargas (bitácora "enlace descargado" con el contador),
+  exhausted y expired → expired, revoked → revoked.
+- Bitácora de enlaces: solicitado (linkId, owner = deviceId, número de
+  elementos, ttlSeconds), preparado, activo, terminado (estado y código) y
+  descargado. Nunca rutas, nombres, etiqueta, token ni clave.
+- La nube falsa (internal/nube/nubetest y cmd/nubefalsa) es solo para
+  pruebas y no entra en make build ni en el host.
+- Las cinco decisiones de la fase, revisadas por el titular:
+  1. La clave K de cada enlace vive en el host (0600, en
+     CAPATAZ_STATE_DIR/links) mientras el enlace está vigente, para que
+     GET /links/{id} devuelva la url completa tras la preparación
+     asíncrona. Se borra al vencer, revocar o fallar; Capataz Nube nunca
+     la recibe.
+  2. tokenHash = base64url(SHA-256(texto de 43 caracteres del token)), con
+     el texto tal como viaja en la URL, no los 32 bytes. Vectores en
+     docs/vectores-nube.json; Laravel debe reproducirlos.
+  3. Una preparación cortada por un reinicio no se reanuda: queda failed
+     (internal_error) y el titular crea el enlace de nuevo.
+  4. Como máximo 2 enlaces en preparing o uploading a la vez; el siguiente
+     recibe 429 rate_limited.
+  5. Las descargas llegan al host al conciliar (cada 5 min), no al
+     momento; la fuente exacta es la bitácora de Capataz Nube.
+- Respaldo: CAPATAZ_STATE_DIR contiene las claves K y los tokens de los
+  enlaces vigentes (además del instanceId). Su respaldo (Time Machine o el
+  que lo sustituya en la Pi) debe ir cifrado; quien lea una copia sin
+  cifrar puede abrir cualquier enlace vigente.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo;
   alternativa: un túnel saliente que abra el propio host, p. ej. Cloudflare Tunnel).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
-- Contrato v0.2.3 de Capataz: 304, 405 y 412 documentados (hoy 405 y 412 salen
-  como invalid_request; 304 lo genera ServeContent con If-Modified-Since);
-  encryption=client por defecto en LinkRequest; el estado exhausted de la
-  nube se muestra como expired en Link.status; Link con payloadSha256,
-  payloadSize, packageSha256 y packageSize (en lugar de sha256 y sizeBytes,
-  ambiguos); código insufficient_storage para disco lleno en el staging.
+- Capataz Nube en Laravel: implementar api/capataz-nube-api.yaml (incluido
+  tokenHash sobre los 43 caracteres) y repetir fase2b-smoke.sh contra ella.
 - Medir el rendimiento en la Raspberry Pi, anotando el modelo de Pi y el tipo
   de disco (SSD por USB, tarjeta SD...) de cada medición:
   - descargas: el ResponseWriter envuelto (bitácora y plazo por inactividad)

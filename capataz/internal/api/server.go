@@ -39,6 +39,7 @@ type Options struct {
 	Auth      auth.Authenticator
 	Syncthing Syncthing
 	Instance  Instance
+	Links     Links // nil: las rutas /links responden cloud_unreachable
 	Logger    *slog.Logger
 }
 
@@ -47,6 +48,7 @@ type Server struct {
 	auth     auth.Authenticator
 	st       Syncthing
 	instance Instance
+	links    Links
 	log      *slog.Logger
 	mux      *http.ServeMux
 	// noWriteDeadline: rutas que gestionan su propio plazo de escritura.
@@ -62,6 +64,7 @@ func New(o Options) *Server {
 		auth:            o.Auth,
 		st:              o.Syncthing,
 		instance:        o.Instance,
+		links:           o.Links,
 		log:             o.Logger,
 		mux:             http.NewServeMux(),
 		noWriteDeadline: map[string]bool{},
@@ -83,6 +86,10 @@ func (s *Server) routeTable() []route {
 		{pattern: "GET /folders", handler: s.handleFolders},
 		{pattern: "GET /files", handler: s.handleFiles},
 		{pattern: "GET /files/download", handler: s.handleDownload, ownDeadline: true},
+		{pattern: "POST /links", handler: s.titular(s.handleCreateLink)},
+		{pattern: "GET /links", handler: s.titular(s.handleListLinks)},
+		{pattern: "GET /links/{id}", handler: s.titular(s.handleGetLink)},
+		{pattern: "DELETE /links/{id}", handler: s.titular(s.handleRevokeLink)},
 	}
 }
 

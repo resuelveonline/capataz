@@ -556,3 +556,46 @@ func TestNoNamesInErrorsOrLogs(t *testing.T) {
 		}
 	}
 }
+
+func TestCheck(t *testing.T) {
+	tests := []struct {
+		path string
+		code string // "" = aceptado
+	}{
+		{"informe.pdf", ""},
+		{"fotos", ""},
+		{"", ""},                   // la carpeta entera
+		{"fotos/ignorado.tmp", ""}, // fuera del índice: lo detecta Begin, no Check
+		{"enlace-informe", CodePathNotAllowed},
+		{"dir-enlace/a.jpg", CodePathNotAllowed},
+		{"../staging", CodePathNotAllowed},
+		{"/etc/hosts", CodePathNotAllowed},
+		{".stversions/v.txt", CodeNotFound},
+		{"no-existe.txt", CodeNotFound},
+		{"fifo-raiz", CodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			e := newEnv(t)
+			err := e.stager().Check(context.Background(), []Item{{Folder: folderID, Path: tt.path}})
+			if tt.code == "" {
+				if err != nil {
+					t.Fatalf("rechazado: %v", err)
+				}
+			} else {
+				wantCode(t, err, tt.code)
+			}
+			if len(e.st.scans) != 0 {
+				t.Error("Check no debe escanear")
+			}
+			if left := e.prepDirs(); len(left) != 0 {
+				t.Errorf("Check no debe tocar el staging: %v", left)
+			}
+		})
+	}
+	e := newEnv(t)
+	wantCode(t, e.stager().Check(context.Background(), []Item{{Folder: "no-existe", Path: "x"}}), CodeNotFound)
+	wantCode(t, e.stager().Check(context.Background(), nil), CodeInvalidRequest)
+	e.st.foldersEr = syncthing.ErrUnavailable
+	wantCode(t, e.stager().Check(context.Background(), []Item{{Folder: folderID, Path: "informe.pdf"}}), CodeSyncthingUnavailable)
+}
