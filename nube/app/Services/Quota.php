@@ -11,11 +11,8 @@ final class Quota
     /** @return array{activeLinks: int, storedBytes: int} */
     public static function usage(Instance $instance): array
     {
-        // Vencer primero lo que ya pasó de hora, para no contarlo.
-        Link::where('instance_id', $instance->id)
-            ->whereIn('state', [Link::UPLOADING, Link::ACTIVE])
-            ->where('expires_at', '<=', now())
-            ->get()->each(fn (Link $l) => Lifecycle::refresh($l));
+        // Aplicar primero lo que ya cambió por tiempo, para no contarlo.
+        Lifecycle::refreshDue($instance->id);
 
         $q = Link::where('instance_id', $instance->id)->whereIn('state', [Link::UPLOADING, Link::ACTIVE]);
 

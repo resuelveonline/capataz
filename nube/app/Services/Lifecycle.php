@@ -43,6 +43,33 @@ final class Lifecycle
         return $link;
     }
 
+    /**
+     * Aplica refresh a los enlaces de la instancia (o de todas, con null)
+     * que ya tienen un cambio pendiente por tiempo.
+     */
+    public static function refreshDue(?int $instanceId = null): int
+    {
+        $now = now();
+        $q = Link::query()->where(function ($q) use ($now) {
+            $q->where(fn ($q) => $q->whereIn('state', [Link::UPLOADING, Link::ACTIVE, Link::EXHAUSTED])->where('expires_at', '<=', $now))
+                ->orWhere(fn ($q) => $q->where('state', Link::UPLOADING)
+                    ->where('last_activity_at', '<=', $now->copy()->subSeconds(config('capataz.upload_abandon_seconds'))))
+                ->orWhere(fn ($q) => $q->where('state', Link::EXHAUSTED)->whereNull('purged_at')
+                    ->where('exhausted_at', '<=', $now->copy()->subSeconds(config('capataz.exhausted_grace'))))
+                ->orWhere(fn ($q) => $q->whereIn('state', [Link::EXPIRED, Link::REVOKED, Link::FAILED])->whereNull('purged_at'));
+        });
+        if ($instanceId !== null) {
+            $q->where('instance_id', $instanceId);
+        }
+        $n = 0;
+        $q->orderBy('id')->each(function (Link $l) use (&$n) {
+            self::refresh($l);
+            $n++;
+        });
+
+        return $n;
+    }
+
     /** Borra los bytes y las partes registradas. */
     public static function purge(Link $link): void
     {

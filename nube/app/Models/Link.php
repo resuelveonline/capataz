@@ -48,6 +48,9 @@ class Link extends Model
 
     protected $guarded = ['id'];
 
+    // Igual que en la migración, para que un modelo recién creado lo tenga.
+    protected $attributes = ['downloads' => 0];
+
     // tokenHash y metaBlob no se exponen salvo en /s/{token}/meta.
     protected $hidden = ['token_hash', 'meta_blob', 'request_hash'];
 
