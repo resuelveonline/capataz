@@ -3,7 +3,9 @@
 Servicio en Go que corre junto a Syncthing en el host y expone la API de
 Capataz (contrato: [`../api/capataz-api.yaml`](../api/capataz-api.yaml)).
 Fase 1: API de **solo lectura**. Fase 2a: orden local `capataz prepare` que
-arma y cifra el paquete de un enlace (sin red ni Capataz Nube todavía).
+arma y cifra el paquete de un enlace. Fase 2b: enlaces temporales con
+`POST /links`, subidos a Capataz Nube (probados contra una nube falsa; el
+servidor Laravel aún no existe).
 
 | Ruta | Auth | Qué hace |
 |---|---|---|
@@ -11,6 +13,10 @@ arma y cifra el paquete de un enlace (sin red ni Capataz Nube todavía).
 | `GET /folders` | Bearer | carpetas de Syncthing (`id` y `label`) |
 | `GET /files?folder=&path=` | Bearer | lista una carpeta (`Entry`: `name`, `path`, `isDir`, `size`, `modified`) |
 | `GET /files/download?folder=&path=` | Bearer | descarga un archivo; admite `Range`, `If-Range` y `HEAD` |
+| `POST /links` | titular | crea un enlace temporal; responde 202 en `preparing` |
+| `GET /links?status=` | titular | lista los enlaces, del más reciente al más antiguo |
+| `GET /links/{id}` | titular | estado del enlace; con `active` trae la `url` (`…/s/<token>#<clave>`) |
+| `DELETE /links/{id}` | titular | revoca (en la nube primero; 502 `cloud_unreachable` si no responde) |
 
 `folder` es el **id** de Syncthing (p. ej. `fgyww-edjwa`), no el label.
 `path` es relativa a la carpeta, con `/` como separador; vacía es la raíz.
@@ -39,6 +45,8 @@ siempre tiene prioridad sobre el `.env`.
 | `CAPATAZ_LISTEN` | no | dirección de escucha, por defecto `127.0.0.1:8080` |
 | `CAPATAZ_INSTANCE_NAME` | no | nombre público en `GET /instance`, por defecto `Capataz` |
 | `CAPATAZ_STAGING_DIR` | no | copias congeladas temporales, por defecto `~/capataz-host/staging`; debe ser 0700 y estar fuera de toda carpeta sincronizada |
+| `CAPATAZ_NUBE_URL` | no | Capataz Nube, por defecto `https://sync.softmx.net`; `http` solo en loopback |
+| `CAPATAZ_NUBE_KEY` | no | clave de instancia de la nube, 32 bytes en base64url (secreto). Vacía: los enlaces responden `cloud_unreachable` |
 
 Si falta alguna obligatoria, el servicio no arranca y el mensaje nombra la
 variable, nunca su valor.
@@ -131,6 +139,43 @@ con ñ en NFC y NFD y varios elementos; descifra cada paquete con
 `unzip -t`. Termina comprobando casos de error, que la bitácora no contenga
 nombres ni claves y que el staging quede vacío.
 
+## Fase 2b: enlaces temporales
+
+```sh
+curl -H @auth-header -H 'Content-Type: application/json' \
+  --data '{"items":[{"folder":"fgyww-edjwa","path":"informe.pdf"}],"ttlSeconds":86400}' \
+  http://127.0.0.1:8080/links          # 202 {"id":..., "status":"preparing"}
+curl -H @auth-header http://127.0.0.1:8080/links/<id>   # hasta status=active
+```
+
+`POST /links` valida en el acto la forma, la vigencia (1 h a 30 días), que
+las carpetas existan y que las rutas sean admisibles (400, 404). En segundo
+plano: copia congelada, ZIP si hace falta, CPK1, apertura de la subida,
+partes de 8 MiB (reanudables, con reintentos) y cierre con el SHA-256 del
+paquete. Lo que falle ahí llega en `failureCode` con `status=failed`.
+
+Cada enlace se guarda en `CAPATAZ_STATE_DIR/links/<id>.json` (0600, en un
+directorio 0700) con su token y su clave K, que se borran al vencer, revocar
+o fallar. Tras un reinicio, una subida a medias se reanuda (solo las partes
+que faltan) y una preparación a medias queda `failed`. El vencimiento se
+aplica en local cada 30 s; cada 5 min se concilian con la nube las descargas
+y los estados `exhausted` (se muestra como `expired`), `expired` y
+`revoked`.
+
+### Prueba de humo de la Fase 2b
+
+```sh
+scripts/fase2b-smoke.sh
+```
+
+Arranca `cmd/nubefalsa` (la nube falsa de `internal/nube/nubetest`, en
+`127.0.0.1:18090`, con una clave aleatoria en un archivo 0600) y Capataz en
+el puerto 18082 con un estado y un staging temporales propios. Crea enlaces
+para un archivo de 9 MiB (dos partes) y una carpeta, los descarga por la
+cara pública de la nube y los descifra con `cpk1-verify.mjs`; prueba el tope
+de descargas, la revocación, los errores síncronos y que la bitácora no
+contenga nombres, tokens ni claves.
+
 ## Probar desde otro equipo de la red
 
 Por defecto Capataz solo escucha en `127.0.0.1`. Para probarlo desde otro
@@ -182,14 +227,14 @@ la instancia pasa a ser otra.
   `path_not_allowed`.
 - **Rendimiento de descarga:** el `ResponseWriter` envuelto (bitácora y plazo
   por inactividad) desactiva `sendfile`. Pendiente medirlo en la Raspberry Pi.
-- 405 y 412 salen como `invalid_request` y todavía no están documentados en
-  el contrato (pendiente v0.2.3).
+- 405, 412 y 416 salen con `code` `invalid_request` (documentado en el
+  contrato v0.2.3).
 
 ## Limitaciones de la Fase 2a
 
-- **Solo local:** no hay `POST /links`, no se sube nada a Capataz Nube ni se
-  guarda la clave o el linkId; `capataz prepare` es una orden de desarrollo.
-  Una ejecución usa una sola carpeta de Syncthing (`stage` ya admite varias).
+- **`capataz prepare` es una orden de desarrollo:** no sube nada ni guarda
+  la clave; los enlaces reales van por `POST /links` (Fase 2b). Una
+  ejecución usa una sola carpeta de Syncthing (`stage` ya admite varias).
 - **Una consulta a `db/file` por archivo:** carpetas con miles de archivos
   tardan en validarse.
 - **Congelado archivo por archivo:** cada archivo se verifica al copiarlo,
@@ -198,22 +243,40 @@ la instancia pasa a ser otra.
 - **Enlaces simbólicos nunca se siguen** (a diferencia del listado y la
   descarga de la Fase 1): seleccionado directamente es `path_not_allowed`;
   dentro de una carpeta se omite y se cuenta.
-- **Omitidos solo se cuentan** en el manifiesto (ignored, hidden, symlink,
-  special); el aviso al titular llegará con los enlaces.
+- **Omitidos solo se cuentan** (ignored, hidden, symlink, special): en el
+  manifiesto y en `Link.skipped`, sin nombres.
 - **Colisiones de mayúsculas** solo se resuelven en el primer nivel del ZIP.
   Dentro de una carpeta de un sistema que las distingue (ext4 en la Pi),
   `A.txt` y `a.txt` chocarían al descomprimir en macOS o Windows.
 - **El ZIP no conserva** atributos extendidos, permisos (todo 0644) ni
   bifurcaciones de recursos de macOS.
 - **Disco:** hace falta espacio para el archivo más grande + 2 × la carga útil
-  + 64 MiB; si no hay, `insufficient_storage` (código pendiente del contrato
-  v0.2.3).
+  + 64 MiB; si no hay, `insufficient_storage`.
 - **`cpk.Decrypt` escribe en flujo:** quien lo use directamente debe
   descartar la salida si devuelve error (`DecryptFile` y `cpk1-verify.mjs` ya
   lo hacen).
 - **Sin medir en la Raspberry Pi:** la Pi 4 no tiene extensiones
   criptográficas ARMv8, así que AES-GCM irá bastante más lento que en la Mac
   (la Pi 5 sí las tiene). NFC/NFD solo se probó en APFS.
+
+## Limitaciones de la Fase 2b
+
+- **Sin Capataz Nube real:** todo se probó contra `nubetest`, que sigue el
+  contrato pero no es el Laravel. Cuando exista, repetir la prueba de humo
+  apuntando a él.
+- **Descargas aproximadas:** el host se entera de las descargas al
+  conciliar (cada 5 min), no en el momento; la bitácora de la nube es la
+  fuente exacta.
+- **Una preparación a medias no se reanuda:** tras un reinicio queda
+  `failed` (`internal_error`) y hay que crear el enlace de nuevo.
+- **Dos preparaciones o subidas a la vez** como máximo; la tercera recibe
+  429 `rate_limited`.
+- **El token de desarrollo es la única cuenta**, con rol titular; `owner` de
+  la bitácora es su deviceId fijo hasta el emparejamiento.
+- **La clave K vive en el host** mientras el enlace está vigente (para
+  poder devolver la `url` tras la preparación asíncrona): protege el estado
+  como al propio `.env`.
+- **Sin medir en la Raspberry Pi:** subida, cifrado y copia.
 
 ## Decisiones de diseño (resumen)
 
@@ -251,4 +314,7 @@ internal/cpk/       formato CPK1: cifrado y descifrado en flujo, metadatos, clav
 internal/stage/     copia congelada validada contra Syncthing (stagetest: Syncthing falso)
 internal/bundle/    carga útil: archivo o ZIP, tope y JSON de metadatos
 internal/prepare/   orquestación de stage → bundle → cpk y salida del paquete
+internal/nube/      cliente HMAC de Capataz Nube y subida por partes (nubetest: nube falsa)
+internal/links/     enlaces: estado persistente, tareas, vencimiento, conciliación, revocación
+cmd/nubefalsa/      nube falsa en un puerto fijo para la prueba de humo (solo desarrollo)
 ```

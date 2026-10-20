@@ -99,10 +99,14 @@ archivos, y generar enlaces temporales de solo lectura.
   `node scripts/cpk1-verify.mjs` lo descifra con Web Crypto (y `--vectors`
   valida docs/vectores-cpk1.json). `scripts/fase2a-smoke.sh` lo prueba todo
   contra "pruebas" en `pruebas/_smoke-fase2a/` (se borra al salir).
+- `scripts/fase2b-smoke.sh` (Fase 2b): POST /links de extremo a extremo
+  contra "pruebas" y la nube falsa `cmd/nubefalsa` (puertos 18082 y 18090),
+  con estado y staging temporales propios; descifra con cpk1-verify.mjs.
 - Variables: SYNCTHING_URL, SYNCTHING_API_KEY, CAPATAZ_DEV_TOKEN (≥32),
   CAPATAZ_STATE_DIR obligatorias; CAPATAZ_LISTEN (127.0.0.1:8080),
-  CAPATAZ_INSTANCE_NAME y CAPATAZ_STAGING_DIR (~/capataz-host/staging, 0700)
-  opcionales. El entorno real gana sobre el .env.
+  CAPATAZ_INSTANCE_NAME, CAPATAZ_STAGING_DIR (~/capataz-host/staging, 0700),
+  CAPATAZ_NUBE_URL (https://sync.softmx.net) y CAPATAZ_NUBE_KEY (32 bytes
+  base64url; vacía = enlaces desactivados) opcionales. El entorno real gana sobre el .env.
 - Nunca imprimir el token, el API key ni la clave K: usar archivos 0600
   (`curl -H @archivo`, `--key-file`). Nombres, rutas y contenido tampoco van a
   bitácora, errores ni mensajes de commit.
@@ -119,7 +123,8 @@ archivos, y generar enlaces temporales de solo lectura.
   /folders, /files, /files/download) con token de desarrollo por .env.
 - Fase 2a (rama fase-2a-paquete, implementada): copia congelada, ZIP y
   cifrado CPK1 en local con `capataz prepare`; sin red ni Capataz Nube.
-- Fase 2b (rama fase-2b-enlaces, en curso): contrato v0.2.3, cliente de
-  Capataz Nube (HMAC, subida por partes) y POST/GET/DELETE /links, probados
-  contra una Capataz Nube falsa; el servidor Laravel va en una fase aparte.
+- Fase 2b (rama fase-2b-enlaces, implementada): contrato v0.2.3, cliente
+  de Capataz Nube (HMAC, subida por partes reanudable) y POST/GET/DELETE
+  /links con estado persistente, probados contra una Capataz Nube falsa
+  (internal/nube/nubetest); el servidor Laravel va en una fase aparte.
 - Después: Capataz Nube en Laravel, emparejamiento de dispositivos.

@@ -190,12 +190,49 @@
   cambiar el estado); revoked, expired y failed responden 204.
 - /s/{token} sale de este contrato: lo describe solo el de Capataz Nube.
 
+## 2026-10-19 (Fase 2b: enlaces contra Capataz Nube)
+- tokenHash = base64url(SHA-256) de los 43 caracteres del token tal como
+  van en la URL (no de los 32 bytes): es lo que la nube recibe en
+  /s/{token} y puede hashear sin decodificar. Lo debe hacer igual el
+  Laravel.
+- expiresAt definitivo = hora de abrir la subida + ttlSeconds (lo que pide
+  el contrato de la nube); mientras está en preparing, Link.expiresAt es
+  provisional (createdAt + ttlSeconds).
+- CAPATAZ_NUBE_KEY: 32 bytes en base64url (se acepta también base64 con
+  relleno). Sin ella Capataz arranca y /links responde cloud_unreachable.
+  CAPATAZ_NUBE_URL exige https salvo en loopback.
+- Reloj: si la nube responde timestamp_out_of_window, Capataz toma su
+  serverTime como desfase y reintenta una vez con nonce nuevo.
+- Reintentos: errores de red, 5xx y 429 (respetando Retry-After), con
+  espera exponencial; hasta 8 intentos por petición (unos 5 min). Después,
+  failed con cloud_unreachable y se libera la subida en la nube.
+- Estado por enlace en CAPATAZ_STATE_DIR/links/<id>.json (0600, directorio
+  0700, escritura atómica). Guarda el cuerpo exacto de la apertura para
+  reabrirla igual tras un reinicio (la nube es idempotente por linkId) y
+  subir solo las partes que faltan. Una preparación cortada queda failed
+  con internal_error: su clave solo estaba en memoria.
+- El paquete vive en CAPATAZ_STAGING_DIR/link-<id>/ hasta que la nube
+  activa el enlace; los link-* sin una subida pendiente se borran al
+  arrancar.
+- Como máximo 2 enlaces en preparing o uploading a la vez (429
+  rate_limited con Retry-After: 30).
+- Vencimiento local cada 30 s, sin la nube. Conciliación cada 5 min con
+  GET /v1/links: descargas (bitácora "enlace descargado" con el contador),
+  exhausted y expired → expired, revoked → revoked.
+- Bitácora de enlaces: solicitado (linkId, owner = deviceId, número de
+  elementos, ttlSeconds), preparado, activo, terminado (estado y código) y
+  descargado. Nunca rutas, nombres, etiqueta, token ni clave.
+- La nube falsa (internal/nube/nubetest y cmd/nubefalsa) es solo para
+  pruebas y no entra en make build ni en el host.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
 - Cómo llegan las apps al host fuera de casa (propuesto: Tailscale en desarrollo;
   alternativa: un túnel saliente que abra el propio host, p. ej. Cloudflare Tunnel).
 - Si las apps podrán subir archivos (propuesto: Fase 3).
+- Capataz Nube en Laravel: implementar api/capataz-nube-api.yaml (incluido
+  tokenHash sobre los 43 caracteres) y repetir fase2b-smoke.sh contra ella.
 - Medir el rendimiento en la Raspberry Pi, anotando el modelo de Pi y el tipo
   de disco (SSD por USB, tarjeta SD...) de cada medición:
   - descargas: el ResponseWriter envuelto (bitácora y plazo por inactividad)
