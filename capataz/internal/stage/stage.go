@@ -44,7 +44,7 @@ const (
 	CodeInvalidRequest       = "invalid_request"
 	CodeSyncthingUnavailable = "syncthing_unavailable"
 	CodeInternal             = "internal_error"
-	CodeInsufficientStorage = "insufficient_storage"
+	CodeInsufficientStorage  = "insufficient_storage"
 )
 
 // Error lleva un código del contrato y un motivo genérico. Nunca incluye
