@@ -12,6 +12,7 @@
         "laravel/framework": "^13.17"
     },
     "require-dev": {
+        "mockery/mockery": "^1.6",
         "phpunit/phpunit": "^12.5.12"
     },
     "autoload": {
