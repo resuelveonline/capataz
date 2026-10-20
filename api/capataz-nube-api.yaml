@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Capataz Nube
-  version: 0.1.0
+  version: 0.1.1
   description: |
     Servicio en la nube (Laravel, hosting compartido) que guarda las copias congeladas y
     cifradas que prepara una instancia de Capataz y las sirve por una URL temporal.
@@ -61,10 +61,44 @@ info:
     pasada esa hora la descarga responde 410 y los bytes se borran en la siguiente pasada
     del programador de tareas.
 
-    `maxDownloads` cuenta como descarga cada petición a `/s/{token}/blob` que empiece en el
-    byte 0 (sin `Range` o con `Range: bytes=0-...`). Las peticiones con `Range` que empiezan
-    más adelante son continuaciones y no cuentan. Al agotarse el cupo, las peticiones que
-    empiezan en el byte 0 responden 410 `downloads_exhausted`.
+    `maxDownloads` cuenta como descarga cada petición GET a `/s/{token}/blob` que empiece en el
+    byte 0 (sin `Range`, con `Range: bytes=0-...` o con un sufijo que abarque el paquete
+    entero). Las peticiones con `Range` que empiezan más adelante son continuaciones y no
+    cuentan. Al agotarse el cupo el enlace pasa a `exhausted`: las peticiones que empiezan en el
+    byte 0 y `/s/{token}/meta` responden 410 `downloads_exhausted`, pero las continuaciones se
+    siguen sirviendo durante un margen configurable (por defecto 1 h) para que la última
+    descarga pueda terminar. Pasado el margen, o al vencer `expiresAt`, se borran los bytes y
+    todo responde 410.
+
+    ## Estados en la descarga pública (v0.1.1)
+
+    | Estado | `/s/{token}/meta` y `/s/{token}/blob` |
+    |---|---|
+    | token desconocido | 404 `not_found` |
+    | `failed` | 404 `not_found` (nunca fue utilizable; no se distingue de inexistente) |
+    | `uploading` | 409 `link_not_ready` |
+    | `active` | 200 (y 206 en `/blob`) |
+    | `exhausted` | 410 `downloads_exhausted` (salvo continuaciones dentro del margen) |
+    | `expired` | 410 `link_expired` |
+    | `revoked` | 410 `link_revoked` |
+
+    `HEAD` está permitido en las dos rutas: responde el mismo estado y las mismas cabeceras
+    que el `GET` equivalente (410 incluido), sin cuerpo, y nunca cuenta como descarga.
+
+    ## Range
+
+    Un solo intervalo: `bytes=a-b`, `bytes=a-` o `bytes=-n` (la unidad no distingue
+    mayúsculas; se ignoran espacios alrededor del valor y tras `=`). `b` mayor que el último
+    byte se recorta. Responde 416 con `Content-Range: bytes */<tamaño>` si hay varios
+    intervalos o varios headers `Range`, otra unidad, sintaxis inválida, `a > b`, `a` fuera del
+    paquete o `n = 0`. Casos de prueba en `docs/vectores-range.json`.
+
+    ## Subidas abandonadas
+
+    Un enlace en `uploading` sin actividad (ninguna parte recibida y ninguna apertura) durante
+    un plazo configurable (por defecto 48 h) pasa a `failed` con `failureCode`
+    `upload_abandoned` y se borran sus partes. El plazo cuenta desde la última parte recibida
+    o, si no hay ninguna, desde la apertura.
   license:
     name: Propietaria
     url: https://github.com/resuelveonline/capataz
@@ -284,7 +318,8 @@ paths:
         el SHA-256 del paquete ensamblado coincide con `ciphertextSha256`. Si todo cuadra,
         el enlace pasa a `active` y desde ese momento `/s/{token}` lo sirve.
         Si faltan partes responde 409 `parts_missing` con `missingParts`.
-        Es idempotente: completar un enlace ya activo con el mismo hash responde 200.
+        Es idempotente: completar un enlace ya activo con el mismo hash responde 200; con otro
+        hash responde 409 `conflict` y el enlace sigue activo.
       parameters:
         - $ref: "#/components/parameters/LinkId"
         - $ref: "#/components/parameters/Instance"
@@ -346,8 +381,9 @@ paths:
       operationId: getPublicMeta
       summary: Estado del enlace y metadatos cifrados
       description: |
-        Es la única operación que distingue enlace inexistente (404), vencido o revocado (410),
-        agotado (410) y aún no listo (409 `link_not_ready`, mientras se sube).
+        Distingue enlace inexistente o fallido (404), vencido, revocado o agotado (410) y aún no
+        listo (409 `link_not_ready`, mientras se sube). Ver la tabla de estados en la
+        descripción general.
       parameters:
         - $ref: "#/components/parameters/Token"
       security: []
@@ -361,6 +397,19 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "410": { $ref: "#/components/responses/Gone" }
         "429": { $ref: "#/components/responses/RateLimited" }
+    head:
+      tags: [Descarga]
+      operationId: headPublicMeta
+      summary: Igual que GET, sin cuerpo
+      parameters:
+        - $ref: "#/components/parameters/Token"
+      security: []
+      responses:
+        "200": { description: Enlace activo. }
+        "404": { description: Inexistente o fallido. }
+        "409": { description: Aún no listo. }
+        "410": { description: "Vencido, revocado o agotado." }
+        "429": { description: Demasiadas peticiones. }
 
   /s/{token}/blob:
     get:
@@ -372,7 +421,8 @@ paths:
         intervalo y responde 206 con `Content-Range`. Cabeceras: `Content-Type:
         application/octet-stream`, `Accept-Ranges: bytes`, `Cache-Control: no-store`,
         `Content-Disposition` ausente (el nombre real está cifrado en los metadatos).
-        Ver las reglas de conteo de `maxDownloads` en la descripción general.
+        Ver en la descripción general las reglas de `Range`, de conteo de `maxDownloads` y de
+        los estados.
       parameters:
         - $ref: "#/components/parameters/Token"
         - name: Range
@@ -405,7 +455,7 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "410": { $ref: "#/components/responses/Gone" }
         "416":
-          description: Intervalo no satisfacible.
+          description: Intervalo no satisfacible (`invalid_request`).
           headers:
             Content-Range:
               schema: { type: string, example: "bytes */524296032" }
@@ -413,6 +463,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CloudError" }
         "429": { $ref: "#/components/responses/RateLimited" }
+    head:
+      tags: [Descarga]
+      operationId: headBlob
+      summary: Igual que GET, sin cuerpo y sin contar como descarga
+      parameters:
+        - $ref: "#/components/parameters/Token"
+        - name: Range
+          in: header
+          required: false
+          schema: { type: string }
+      security: []
+      responses:
+        "200": { description: Paquete completo (solo cabeceras). }
+        "206": { description: Intervalo (solo cabeceras). }
+        "404": { description: Inexistente o fallido. }
+        "409": { description: Aún no listo. }
+        "410": { description: "Vencido, revocado o agotado." }
+        "416": { description: Intervalo no satisfacible. }
+        "429": { description: Demasiadas peticiones. }
 
 components:
   securitySchemes:
@@ -517,15 +586,15 @@ components:
         maxPartSize:       { type: integer, example: 8388608 }
         minTtlSeconds:     { type: integer, example: 3600 }
         maxTtlSeconds:     { type: integer, example: 2592000 }
-        maxActiveLinks:    { type: integer }
+        maxActiveLinks:    { type: integer, description: Tope de enlaces en `uploading` o `active` a la vez. }
         maxStoredBytes:    { type: integer, format: int64, description: Cupo total de bytes cifrados vigentes por instancia. }
 
     CloudUsage:
       type: object
       required: [activeLinks, storedBytes]
       properties:
-        activeLinks: { type: integer }
-        storedBytes: { type: integer, format: int64 }
+        activeLinks: { type: integer, description: Enlaces en `uploading` o `active`. }
+        storedBytes: { type: integer, format: int64, description: Suma de `encryptedSize` de los enlaces en `uploading` o `active`. }
 
     CloudInstance:
       type: object
@@ -603,7 +672,9 @@ components:
         failureCode:
           type: string
           nullable: true
-          description: Solo con `state=failed`.
+          description: |
+            Solo con `state=failed`: `checksum_mismatch` (el paquete ensamblado no coincide) o
+            `upload_abandoned` (subida sin actividad durante el plazo).
 
     CloudLinkList:
       type: object

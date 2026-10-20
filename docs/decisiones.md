@@ -244,6 +244,44 @@
   que lo sustituya en la Pi) debe ir cifrado; quien lea una copia sin
   cifrar puede abrir cualquier enlace vigente.
 
+## 2026-10-19 (Fase 2c: contrato de Capataz Nube v0.1.1 y diseño del servidor)
+- Capataz Nube se implementa en Laravel 13 dentro del monorepo (nube/), con
+  SQLite en desarrollo y MySQL en producción. Sin sodium (el hosting no lo
+  tiene): hash_hmac, hash_equals y random_bytes.
+- Contrato v0.1.1 (aclaraciones, sin cambios incompatibles):
+  - C1: al agotarse maxDownloads el enlace pasa a exhausted; /meta y las
+    peticiones que empiezan en el byte 0 responden 410, las continuaciones
+    se sirven durante un margen configurable (1 h por defecto) y después se
+    borran los bytes.
+  - C3: en público, failed responde 404 (como inexistente); uploading sigue
+    en 409 link_not_ready, porque el contrato ya lo decía.
+  - C4: maxActiveLinks y usage.activeLinks cuentan uploading y active;
+    storedBytes suma los dos.
+  - C5: una subida sin actividad durante un plazo configurable (48 h por
+    defecto), contado desde la última parte recibida o desde la apertura,
+    pasa a failed con upload_abandoned y se borran sus partes.
+  - C8: complete sobre un enlace activo con otro hash responde 409
+    conflict.
+  - C9: un solo intervalo de Range; varios, otra unidad o sintaxis inválida
+    responden 416 con Content-Range bytes */N. HEAD responde lo mismo que
+    GET (410 incluido), sin cuerpo, y nunca cuenta. Casos en
+    docs/vectores-range.json, compartidos por nubetest y Laravel.
+- nubetest se alineó con v0.1.1 (Range, margen de agotado, HEAD, failed
+  como 404, usage) y links.reconcile ya no copia el failureCode de la nube
+  al enum de Capataz (C6): usa cloud_unreachable.
+- Almacenamiento por partes sin ensamblar: cada parte en
+  capataz-datos/links/<linkId>/, escrita en un temporal y publicada con
+  rename. complete calcula el SHA-256 leyendo las partes en orden; /blob
+  traduce Range a desplazamientos entre partes. Evita duplicar el disco y
+  la escritura de 500 MiB en una petición; a cambio, PHP sirve cada byte
+  (sin offload de LiteSpeed) y hay que probar a fondo los bordes.
+- PUT de partes por flujo (php://input), con Content-Length validado contra
+  el tamaño esperado y SHA-256 incremental; el nonce se inserta solo tras
+  verificar la firma.
+- Antes de seguir con el programador, la limitación de peticiones y el
+  smoke, se prueba en el hosting real un PUT de 8 MiB (Imunify360 en modo
+  kill), Range y el buffering de LiteSpeed.
+
 ## Pendientes por decidir
 - Aislamiento del hosting antes de datos reales.
 - Límites de PHP del subdominio (hPanel) y estado del SSL de sync.softmx.net.
