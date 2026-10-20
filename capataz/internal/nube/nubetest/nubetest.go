@@ -72,8 +72,16 @@ type link struct {
 	downloads int
 }
 
-// New arranca la nube falsa con una clave aleatoria fija para la prueba.
+// New arranca la nube falsa en un puerto libre de loopback.
 func New(instanceID string, key []byte) *Server {
+	s := NewUnstarted(instanceID, key)
+	s.Start()
+	return s
+}
+
+// NewUnstarted la crea sin arrancar, para elegir antes el Listener (la
+// prueba de humo la necesita en un puerto fijo).
+func NewUnstarted(instanceID string, key []byte) *Server {
 	s := &Server{
 		InstanceID: instanceID,
 		Key:        bytes.Clone(key),
@@ -84,7 +92,7 @@ func New(instanceID string, key []byte) *Server {
 		byToken:    map[string]string{},
 		requests:   map[string]int{},
 	}
-	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
+	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
 	return s
 }
 
