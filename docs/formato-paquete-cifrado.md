@@ -25,7 +25,10 @@ https://sync.softmx.net/s/<token>#<clave>
                           └─ 32 bytes aleatorios, base64url (43 caracteres). Identifica el enlace.
 ```
 
-`token` y `clave` son independientes entre sí. El servidor solo conoce `SHA-256(token)`.
+`token` y `clave` son independientes entre sí. El servidor solo conoce
+`tokenHash = base64url_sin_relleno(SHA-256(token))`, calculado sobre el **texto de 43
+caracteres** del token tal como viaja en la URL (bytes ASCII), no sobre los 32 bytes
+decodificados. Vectores en [`vectores-nube.json`](vectores-nube.json).
 
 ## 2. Primitivas
 

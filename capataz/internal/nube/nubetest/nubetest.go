@@ -7,7 +7,6 @@ package nubetest
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -233,9 +232,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, body []byt
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return false
 	}
-	m := hmac.New(sha256.New, s.Key)
-	io.WriteString(m, nube.CanonicalString(r.Method, r.URL.RequestURI(), h.Get("X-Capataz-Timestamp"), nonce, bodyHex))
-	want := base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+	_, _, want := nube.Sign(s.Key, r.Method, r.URL.RequestURI(), h.Get("X-Capataz-Timestamp"), nonce, body)
 	if subtle.ConstantTimeCompare([]byte(want), []byte(h.Get("X-Capataz-Signature"))) != 1 {
 		writeErr(w, http.StatusUnauthorized, "invalid_signature")
 		return false
@@ -461,8 +458,7 @@ func (s *Server) public(w http.ResponseWriter, r *http.Request, parts []string) 
 		writeErr(w, http.StatusNotFound, "not_found")
 		return
 	}
-	sum := sha256.Sum256([]byte(parts[0]))
-	id, ok := s.byToken[base64.RawURLEncoding.EncodeToString(sum[:])]
+	id, ok := s.byToken[nube.TokenHash(parts[0])]
 	if !ok {
 		writeErr(w, http.StatusNotFound, "not_found")
 		return

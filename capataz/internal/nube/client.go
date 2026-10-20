@@ -415,19 +415,37 @@ func (c *Client) sign(req *http.Request, body []byte) error {
 	}
 	nonce := base64.RawURLEncoding.EncodeToString(nb[:])
 	ts := strconv.FormatInt(c.now().Unix()+c.skew.Load(), 10)
-	sum := sha256.Sum256(body)
-	bodyHex := hex.EncodeToString(sum[:])
-
-	m := hmac.New(sha256.New, c.key)
-	io.WriteString(m, CanonicalString(req.Method, req.URL.RequestURI(), ts, nonce, bodyHex))
+	bodyHex, _, sig := Sign(c.key, req.Method, req.URL.RequestURI(), ts, nonce, body)
 
 	h := req.Header
 	h.Set("X-Capataz-Instance", c.instanceID)
 	h.Set("X-Capataz-Timestamp", ts)
 	h.Set("X-Capataz-Nonce", nonce)
 	h.Set("X-Capataz-Content-SHA256", bodyHex)
-	h.Set("X-Capataz-Signature", base64.RawURLEncoding.EncodeToString(m.Sum(nil)))
+	h.Set("X-Capataz-Signature", sig)
 	return nil
+}
+
+// Sign calcula, sin efectos, lo que firma una petición: el SHA-256 hex del
+// cuerpo (X-Capataz-Content-SHA256), la cadena canónica y la firma
+// base64url (X-Capataz-Signature). target es la ruta con su consulta tal
+// como viaja, sin host. Lo usan el cliente, la nube falsa y los vectores
+// de docs/vectores-nube.json.
+func Sign(key []byte, method, target, timestamp, nonce string, body []byte) (bodyHex, canonical, signature string) {
+	sum := sha256.Sum256(body)
+	bodyHex = hex.EncodeToString(sum[:])
+	canonical = CanonicalString(method, target, timestamp, nonce, bodyHex)
+	m := hmac.New(sha256.New, key)
+	io.WriteString(m, canonical)
+	return bodyHex, canonical, base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
+// TokenHash es el tokenHash del contrato: base64url sin relleno del
+// SHA-256 del texto de 43 caracteres del token, tal como viaja en la URL
+// (no de los 32 bytes decodificados).
+func TokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // CanonicalString arma la cadena que se firma. Se exporta para que la nube

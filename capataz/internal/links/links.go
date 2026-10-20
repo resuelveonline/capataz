@@ -14,8 +14,6 @@ package links
 import (
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -537,7 +535,6 @@ func (m *Manager) prepare(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256([]byte(token))
 	mf := res.Manifest
 
 	m.mu.Lock()
@@ -552,7 +549,7 @@ func (m *Manager) prepare(ctx context.Context, id string) error {
 	r.Skipped = &skipped
 	r.ExpiresAt = m.o.Now().UTC().Truncate(time.Second).Add(time.Duration(r.TTL) * time.Second)
 	r.Open = &nube.OpenUploadRequest{
-		LinkID: id, TokenHash: base64.RawURLEncoding.EncodeToString(sum[:]),
+		LinkID: id, TokenHash: nube.TokenHash(token),
 		ExpiresAt: r.ExpiresAt, MaxDownloads: r.MaxDownloads, CipherVersion: mf.CipherVersion,
 		EncryptedSize: mf.PackageSize, PartSize: nube.PartSize, MetaBlob: string(meta),
 	}

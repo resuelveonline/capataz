@@ -12,7 +12,15 @@ info:
     - **Descarga pública** (`/s/...`): la usa el navegador de quien recibe el enlace.
 
     Capataz Nube **nunca** ve el contenido, los nombres ni la clave: guarda bytes cifrados
-    con el formato CPK1 (ver `docs/formato-paquete-cifrado.md`) y `SHA-256(token)`.
+    con el formato CPK1 (ver `docs/formato-paquete-cifrado.md`) y `tokenHash`.
+
+    ## tokenHash
+
+    `tokenHash = base64url_sin_relleno(SHA-256(token))`, donde `token` es el **texto de 43
+    caracteres** tal como viaja en la URL (`/s/{token}`), en bytes ASCII. No se decodifica a
+    los 32 bytes antes de hashear. El resultado mide 43 caracteres. Al recibir `/s/{token}`,
+    la nube calcula lo mismo sobre el segmento de la ruta y lo busca. Vectores en
+    `docs/vectores-nube.json`.
 
     ## Autenticación de la API de instancia
 
@@ -546,7 +554,10 @@ components:
         tokenHash:
           type: string
           pattern: "^[A-Za-z0-9_-]{43}$"
-          description: base64url (sin relleno) de SHA-256(token). Debe ser único.
+          description: |
+            base64url sin relleno de SHA-256 del texto de 43 caracteres del token, tal como
+            viaja en la URL (no de los 32 bytes decodificados). Debe ser único. Vectores en
+            `docs/vectores-nube.json`.
         expiresAt:
           type: string
           format: date-time
