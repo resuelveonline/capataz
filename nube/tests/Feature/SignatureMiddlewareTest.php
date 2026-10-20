@@ -31,7 +31,8 @@ class SignatureMiddlewareTest extends TestCase
         Route::middleware('capataz.signed')->group(function () use ($echo) {
             Route::get('/v1/links', $echo);
             Route::post('/v1/links', $echo);
-            Route::put('/v1/links/{id}/parts/{n}', $echo);
+            // Mismo URI que las rutas reales: estas las sustituyen en la prueba.
+            Route::put('/v1/links/{linkId}/parts/{n}', $echo);
         });
     }
 

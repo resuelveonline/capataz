@@ -5,6 +5,7 @@
 
 use App\Http\Controllers\InstanceController;
 use App\Http\Controllers\LinksController;
+use App\Http\Controllers\PartsController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('capataz.signed')->prefix('v1')->group(function () {
@@ -12,4 +13,5 @@ Route::middleware('capataz.signed')->prefix('v1')->group(function () {
     Route::post('links', [LinksController::class, 'open']);
     Route::get('links', [LinksController::class, 'index']);
     Route::get('links/{linkId}', [LinksController::class, 'show']);
+    Route::put('links/{linkId}/parts/{n}', [PartsController::class, 'put']);
 });
