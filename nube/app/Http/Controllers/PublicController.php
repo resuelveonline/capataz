@@ -7,6 +7,7 @@ use App\Services\Lifecycle;
 use App\Support\BlobStreamer;
 use App\Support\CloudError;
 use App\Support\CloudLinkView;
+use App\Support\RangeParser;
 use App\Support\Signature;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -66,25 +67,34 @@ HTML;
         ], 200, self::HEADERS);
     }
 
-    /** GET /s/{token}/blob: el paquete por flujo desde sus partes. */
+    /**
+     * GET /s/{token}/blob: el paquete por flujo desde sus partes, entero o
+     * un solo intervalo. Cuenta como descarga cada GET que empieza en el
+     * byte 0; HEAD responde igual (410 incluido), sin cuerpo y sin contar.
+     */
     public function blob(Request $request, string $token): Response|StreamedResponse
     {
         $link = $this->find($token);
         $this->rejectUnavailable($link);
-        if ($request->headers->has('Range')) {
-            // Range llega en el commit siguiente.
-            throw new CloudError(416, 'invalid_request', 'intervalo no satisfacible', headers: ['Content-Range' => 'bytes */'.$link->encrypted_size]);
+        $size = $link->encrypted_size;
+        $range = RangeParser::parse(RangeParser::headerValues($request), $size);
+        if ($range === null) {
+            throw new CloudError(416, 'invalid_request', 'intervalo no satisfacible', headers: self::HEADERS + ['Content-Range' => "bytes */$size"]);
         }
-        $start = 0;
-        $end = $link->encrypted_size - 1;
-        // Laravel atiende HEAD con la ruta GET: mismas cabeceras y estado,
-        // sin cuerpo y sin contar como descarga.
+        [$start, $end, $partial] = $range;
         $head = $request->isMethod('HEAD');
-        if ($link->state === Link::EXHAUSTED || (! $head && ! $this->countDownload($link))) {
-            throw new CloudError(410, 'downloads_exhausted', 'el enlace agotó sus descargas', headers: self::HEADERS);
+        $exhausted = new CloudError(410, 'downloads_exhausted', 'el enlace agotó sus descargas', headers: self::HEADERS);
+
+        if ($link->state === Link::EXHAUSTED) {
+            // Solo continuaciones, y solo mientras queden los bytes (margen).
+            if ($start === 0 || $link->purged_at !== null) {
+                throw $exhausted;
+            }
+        } elseif ($start === 0 && ! $head && ! $this->countDownload($link)) {
+            throw $exhausted;
         }
 
-        return $this->streamed($link, $start, $end, 200, $head);
+        return $this->streamed($link, $start, $end, $partial ? 206 : 200, $head);
     }
 
     /**
